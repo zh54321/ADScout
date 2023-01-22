@@ -67,7 +67,7 @@ function pwsprayinguserexport
     Write-Host 
     Write-Host "Searching for Accounts which are: Enabled, not locked, 0 badpwCount, PW is not expired"
     Write-Host
-    $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired -Filter {Enabled -eq "true"} -Server $domain | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0-and $_.PasswordExpired -eq 0} | Select SamAccountName -ExpandProperty SamAccountName
+    $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired -Filter {Enabled -eq "true"} -Server $domain | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0-and $_.PasswordExpired -eq 0} | Select-Object SamAccountName -ExpandProperty SamAccountName
     Write-Host "Found"$table.count "Users. Usernames exportet to users_pw_spraying.txt"
 
     $domain = Get-ADDomain -Server $domain | select-object PDCEmulator,Forest
@@ -106,12 +106,12 @@ function vulnuserexport
     
     Write-Host "================ Overview ================ "
     Write-Host 
-    if (($ReversiblePasswordEncryption | measure).count -gt 0) {write-host "Reversible PW encryption:" ($ReversiblePasswordEncryption | measure).count; $showrevpwenc = 1} else {write-host "Reversible PW encryption:0"}
-    if (($ASREPRoastable | measure).count -gt 0) {write-host "ASREP roastable:" ($ASREPRoastable | measure).count; $showasproastable = 1} else {write-host "ASREP roastable: 0"}
-    if (($Kerboroastable | measure).count -gt 0) {write-host "Kerboroastable:" ($Kerboroastable | measure).count; $showKerboroastable = 1} else {write-host "Kerboroastable: 0"}    
-    if (($NoPWRequired | measure).count -gt 0) {write-host "NO PW required:" ($NoPWRequired | measure).count; $showNoPWRequired = 1} else {write-host "NO PW required: 0"}
-    if (($Unconstraineddelegation | measure).count -gt 0) {write-host "Unconstrained delegation:" ($Unconstraineddelegation | measure).count; $showUnconstraineddelegation = 1} else {write-host "Unconstrained delegation: 0"}
-    if (($Constraineddelegation | measure).count -gt 0) {write-host "Constrained delegation:" ($Constraineddelegation | measure).count; $showConstraineddelegation = 1} else {write-host "Constrained delegation: 0"}
+    if (($ReversiblePasswordEncryption | Measure-Object).count -gt 0) {write-host "Reversible PW encryption:" ($ReversiblePasswordEncryption | Measure-Object).count; $showrevpwenc = 1} else {write-host "Reversible PW encryption:0"}
+    if (($ASREPRoastable | Measure-Object).count -gt 0) {write-host "ASREP roastable:" ($ASREPRoastable | Measure-Object).count; $showasproastable = 1} else {write-host "ASREP roastable: 0"}
+    if (($Kerboroastable | Measure-Object).count -gt 0) {write-host "Kerboroastable:" ($Kerboroastable | Measure-Object).count; $showKerboroastable = 1} else {write-host "Kerboroastable: 0"}    
+    if (($NoPWRequired | Measure-Object).count -gt 0) {write-host "NO PW required:" ($NoPWRequired | Measure-Object).count; $showNoPWRequired = 1} else {write-host "NO PW required: 0"}
+    if (($Unconstraineddelegation | Measure-Object).count -gt 0) {write-host "Unconstrained delegation:" ($Unconstraineddelegation | Measure-Object).count; $showUnconstraineddelegation = 1} else {write-host "Unconstrained delegation: 0"}
+    if (($Constraineddelegation | Measure-Object).count -gt 0) {write-host "Constrained delegation:" ($Constraineddelegation | Measure-Object).count; $showConstraineddelegation = 1} else {write-host "Constrained delegation: 0"}
 
     Write-Host 
     Write-Host 
@@ -426,7 +426,7 @@ while(!$goon){
         }
     }
     
-    if (($domaintest | measure).count -gt 0) {
+    if (($domaintest | Measure-Object).count -gt 0) {
     
     $goon = 1
     $forest = $domaintest.Forest
