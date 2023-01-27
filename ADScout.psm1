@@ -446,16 +446,49 @@ function gposearchcontent
     Show-CustomMenu
 }
 
+function ADS-portcheck {
+    Param($address, $port, $timeout=1000)
 
+    $socket=New-Object System.Net.Sockets.TcpClient
+    try {
+        $result=$socket.BeginConnect($address, $port, $NULL, $NULL)
+        if (!$result.AsyncWaitHandle.WaitOne($timeout, $False)) {
+            $open = $false
+        } else {
+            $open = $true
+        }               
+    }
+    finally {
+        $socket.Close()
+    }
+    return($open)
+}
+
+function ADS-preconditionchecks
+{
+    # Check if AD commands from an ActiveDirctory modules are available
+    if (@(Get-Command -Module *ActiveDirectory*).count -gt 100) {
+        Write-Output "[+] AD Module seems to be installed"
+    } else {
+        Write-host "[-] AD PS Module not available (install RSAT!)" -ForegroundColor DarkRed
+    }
+}
 
 function ADS-connectionchecks
 {
-        # Check if Domain query is possible
+    if ($ADSconnectioncheck) {
+        Remove-Variable ADSconnectioncheck -Scope Global -Force
+    }
+
+     # Check if Domain query is possible
+    write-host "[*] Perfoming AD connectivity check"
     try {
-        $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+        $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().name
+        Write-host "[+] Host is domain joined:"$domain
     }
     catch {
-        Write-Output "[-] Not member of a Domain"
+        Write-host "[-] Current host is not member of a Domain"
+        [bool] $domjoined = 0;
         #Detect runas
         $windowtitle=$host.UI.RawUI.WindowTitle
         $values = @('wird als','running as')
@@ -464,42 +497,89 @@ function ADS-connectionchecks
             $windowtitle = $windowtitle -split ("\(|\)")
             $windowtitle = $windowtitle[1] -split (" ")
             write-host "[+] Script Running as" $windowtitle[2]
+            [bool] $isrunas = 1;
         } else {
-            write-host "[-] Not running in a different user context"
+            [bool] $isrunas = 0;
+            write-host "[-] Not running in a different user context" -ForegroundColor DarkRed
+            
         }
     }
-
-    while(!$connectioncheck){
+   
+    while(!$ADSconnectioncheck){
         
-        if ($env:Computername -ne $domain) {
 
-            Write-Host "Performing connectivity check..."
-            Write-host "Running under " $host.UI.RawUI.WindowTitle
-            Write-Host 
-            Try{
-                $domaintest = get-addomain -Server $domain
-            }catch{
-                Write-Host "Can't retrive info from domain.."
-                Write-Host "Important start the script with: runas /netonly /user:%domain%%user% powershell"
+        if (!$domain) {
+            $domain = Read-Host "[i] Specify Domain"
+        }       
+
+        #DNS CHECKS if not resolveable ask for IP
+        if(!$dcip) {
+            Write-Host "[*] Trying lookup (DNS):"$domain
+            try {
+                #if valid domain used and can be resolved take the first dc ip.
+                $dcip = Resolve-DnsName -Type A -Name $domain -ErrorAction Stop | select-object -ExpandProperty IPAddress -First 1
+                Write-host "[+] Domainname can be resolved:"$dcip
+            } catch {
+                Write-Host "[-] Can't resolve (DNS):"$domain
+                $dcip = Read-Host "[i] Specify DC IP"
             }
         }
-        
-        if (($domaintest | Measure-Object).count -gt 0) {
-        
-        [bool] $connectioncheck = 1
-        $forest = $domaintest.Forest
 
-        } else {
-            Write-Host
-            write-host "Current Domain: "$domain
-            $domain = Read-Host "Set Domain"    
+        #Verify reachability of the Domain and if the right domainname provided
+        Write-Host "[*] Trying to get domain info from:"$domain" using DC IP: "$dcip
+        try
+        {
+            $domaintest = get-addomain -Identity $domain -Server $dcip -ErrorAction Stop          
         } 
+        
+        #Handle auth issues
+        catch [Microsoft.ActiveDirectory.Management.ADServerDownException]
+        {
+            Write-Host "[!] Connection issue: $PSItem" -ForegroundColor DarkRed
+            Write-Host "[*] Test connection: TCP 9389 on"$dcip
+            if (ADS-portcheck $dcip 9389) {
+                Write-Host "[+] Connection OK - TCP 9389 on"$dcip
+                Write-Host "[!] No idea whats wrong :-(" -ForegroundColor DarkRed
+                exit
+            } else {
+                Write-Host "[!] Can't connect to ADWeb Service: "$PSItem -ForegroundColor DarkRed
+                Remove-Variable dcip -Force
+            }
+        }
 
+        #Handle auth issues
+        catch [System.Security.Authentication.AuthenticationException] 
+        {
+            Write-Host "[!] Access issue: $PSItem" -ForegroundColor DarkRed
+            Write-Host "[!] Important: If not domain joined, start the powershell: runas /netonly /user:%domain%\%user% powershell" -ForegroundColor DarkRed
+            exit
+        }
+
+        #Handle wrong domain name issues
+        catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] 
+        {
+            Write-Host "[!] Connection to DC sucessfull but Domain not found: $PSItem" -ForegroundColor DarkRed
+            Remove-Variable domain -Force
+        }
+
+        #Handle unknow issues
+        catch {
+            Write-Host "[!] Unknow error: $PSItem" -ForegroundColor DarkRed
+            exit
+            #DEBUG
+            $PSItem | Select-Object -Property *
+        }
+
+        # Check if connection successfully if not loop
+        if (($domaintest | Measure-Object).count -gt 0) {      
+            Set-Variable -Name ADSconnectioncheck -Value $true -Scope Global
+            Write-Host "[+] Connection check successfull with:"$domain
+        }
     }
 }
 
+## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
 
-
-Export-ModuleMember -Function ADS-interactive,ADS-connectionchecks
+Export-ModuleMember -Function ADS-interactive,ADS-connectionchecks,ADS-preconditionchecks,ADS-portcheck
 
  
