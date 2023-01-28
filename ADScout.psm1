@@ -1,41 +1,9 @@
 <#
  .Synopsis
   AD Pentest Helper
-
  .Description
-  A module to help with comman task in an AD pentest.
-
- .Parameter Start
-  The first month to display.
-
- .Parameter End
-  The last month to display.
-
- .Parameter FirstDayOfWeek
-  The day of the month on which the week begins.
-
- .Parameter HighlightDay
-  Specific days (numbered) to highlight. Used for date ranges like (25..31).
-  Date ranges are specified by the Windows PowerShell range syntax. These dates are
-  enclosed in square brackets.
-
- .Parameter HighlightDate
-  Specific days (named) to highlight. These dates are surrounded by asterisks.
-
- .Example
-   # Show a default display of this month.
-   Show-Calendar
-
- .Example
-   # Display a date range.
-   Show-Calendar -Start "March, 2010" -End "May, 2010"
-
- .Example
-   # Highlight a range of days.
-   Show-Calendar -HighlightDay (1..10 + 22) -HighlightDate "2008-12-25"
+  A module to help with common task in an AD pentest.
 #>
-# Import the DLL if no RSAT
-# Import-Module .\Microsoft.ActiveDirectory.Management_x64.dll
 
 
 function ADS-interactive
@@ -447,6 +415,23 @@ function gposearchcontent
 }
 
 function ADS-portcheck {
+    <#
+        .Synopsis
+        Simple single port check
+        .DESCRIPTION
+        A simple and fast (compared to test-netconnection) port check (TCP Full connection).
+        Give back true or false depending if the connection has been established.
+        .Parameter address
+        IP address of the target
+        .Parameter port
+        Port to check
+        .Parameter timeout
+        How long (ms) to wait for reply (default is set to 1000ms).
+        .Example
+        ADS-portcheck 10.10.10.10 389
+        .Example
+        ADS-portcheck 10.10.10.10 389 4000
+    #>
     Param($address, $port, $timeout=1000)
 
     $socket=New-Object System.Net.Sockets.TcpClient
@@ -464,18 +449,51 @@ function ADS-portcheck {
     return($open)
 }
 
-function ADS-preconditionchecks
+function ADS-preconditioncheck
 {
     # Check if AD commands from an ActiveDirctory modules are available
     if (@(Get-Command -Module *ActiveDirectory*).count -gt 100) {
         Write-Output "[+] AD Module seems to be installed"
+        return $true
     } else {
-        Write-host "[-] AD PS Module not available (install RSAT!)" -ForegroundColor DarkRed
+        Write-host "[-] AD PS Module not available (install RSAT!)"
+        $ADSmodulebasepath = get-module -name ADscout | select-object -ExpandProperty ModuleBase
+        Set-Variable -Name ADSmodulebasepath -Value $ADSmodulebasepath -Scope Global
+        
+        # Check if dll exist if yes, import.
+        Write-host "[*] Check if Microsoft.ActiveDirectory.Management.dll in module folder exist"
+        if (Test-Path -Path $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll) {
+            Write-host "[+] DLL exist. Importing..."
+            import-module $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll -WarningAction silentlyContinue
+            return $true
+        } else {
+            Write-host "[!] No AD PS module or Microsoft.ActiveDirectory.Management.dll found." -ForegroundColor DarkRed
+            return $false
+        }
     }
 }
 
 function ADS-connectionchecks
 {
+    <#
+        .Synopsis
+        Perfoming connection checks to the domain.
+        .DESCRIPTION
+        Functions which is perfoming connections check to the domain.
+        If information can't be colelcted automatically (domain joined host) asks for user input.
+        It ensures:
+            - Domain is defined (either if runned on a domain joined host or by user input)
+            - DC ip is defined (either by dns lookup or by user input)
+            - DC is reachable on port 9389 (AD Webservice)
+            - User has the rights to query (either use the local credentials or use runas)
+            - Domain information can be tretived
+        If successful it will set the global var ADSconnectioncheck to $true.
+    #>
+    if (!(ADS-preconditioncheck)) {
+        break
+    }
+
+    # Check for AD module or AD dll
     if ($ADSconnectioncheck) {
         Remove-Variable ADSconnectioncheck -Scope Global -Force
     }
@@ -580,6 +598,6 @@ function ADS-connectionchecks
 
 ## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
 
-Export-ModuleMember -Function ADS-interactive,ADS-connectionchecks,ADS-preconditionchecks,ADS-portcheck
+Export-ModuleMember -Function ADS-interactive,ADS-preconditionchecks,ADS-portcheck
 
- 
+#Get-Command -module ADScout | write-host

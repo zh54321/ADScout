@@ -1,0 +1,34 @@
+Simple portscanner
+
+Sharescanner?
+
+Listener (check callbacks etc.)
+Client:
+$Listener = New-Object System.Net.Sockets.TcpListener -ArgumentList 7
+$Listener
+Get-NetTCPConnection -LocalPort 7
+$Listener.Start()
+Get-NetTCPConnection | Where LocalPort -eq 7
+$incomingClient = $Listener.AcceptTcpClient()
+$incomingClient
+$incomingClient.Client
+$stream = $incomingClient.GetStream()
+
+Sender:
+$tcpClient = New-Object System.Net.Sockets.TCPClient
+$tcpClient.Connect("DC1",7)
+$Text = "This is a test message"
+[byte[]]$bytes  = [text.Encoding]::Ascii.GetBytes($Text)
+$clientStream = $tcpClient.GetStream()
+$clientStream.Write($bytes,0,$bytes.length)
+$clientStream.Flush()
+$clientStream.DataAvailable
+[byte[]]$inStream = New-Object byte[] 22
+$response = $clientStream.Read($inStream, 0, $inStream.count)
+[Int]$response = $clientStream.Read($inStream, 0, $inStream.count)
+[System.Text.Encoding]::ASCII.GetString($inStream[0..($response - 1)])
+$tcpClient.Dispose()
+$clientStream.Dispose()
+
+
+If possible a sort of sniffer?
