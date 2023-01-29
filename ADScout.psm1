@@ -5,6 +5,51 @@
   A module to help with common task in an AD pentest.
 #>
 
+################ INIT
+write-host "[*] Doing setup stuff"
+
+#Check if config exist and attempt to load it. Load default values if failing
+if(test-path -Path ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml) -PathType Leaf) {
+    write-host "[+] Config file detected. Try to load.."
+    try {
+        $ADScout = Import-Clixml ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
+        write-host "[+] Config imported:"
+        Write-Host ($ADScout | Format-table -Force | Out-String)
+    }
+    catch {
+        write-host "[-] Config does not work"$PSItem
+        write-host "[*] Renaming failed config to envconfig.xml.failed"
+        Rename-Item -Path $ADScout.EnvConfig -NewName "envconfig.xml.failed"
+        write-host "[*] Defining default values"
+        $ADScout = [ordered]@{
+            Logfolder           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath logs)
+            Lootfolder          = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath loot)
+            EnvConfig           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
+            Connectioncheck     = $null
+            Domain              = $null
+            Dcip                = $null
+        }
+    }
+}
+
+New-Variable -Name ADScout -Value $ADScout -Scope Global -Force
+
+If(!(test-path -PathType container $ADScout.Logfolder)) {
+    New-Item -ItemType Directory -Path $ADScout.Logfolder
+}
+If(!(test-path -PathType container $ADScout.Lootfolder)) {
+    New-Item -ItemType Directory -Path $ADScout.Lootfolder
+}
+
+
+#Write config in case new values etc.
+function ADS-writeconfig {
+    $ADScout | Export-Clixml $ADScout.EnvConfig
+}
+
+function ADS-writelogandoutput {
+    $ADScout | Export-Clixml $ADScout.EnvConfig
+}
 
 function ADS-interactive
 {
@@ -259,39 +304,39 @@ function monitorelockouts
     
 }
 
-function getDomainInfo
+function ADS-getDomainInfo
 {
-
-
-    Clear-Host
+    ADS-check
+    #Clear-Host
     Write-Host "======================================================"
     Write-Host "=================== GET Domain Info =================="
     Write-Host "======================================================"
     Write-Host
     Write-Host "---Domain Info---"
-    Get-ADDomain -Server $domain | select-object Forest,DomainMode,UsersContainer,ComputersContainer,InfrastructureMaster,ParentDomain,ChildDomains | format-table
+    Get-ADDomain -Server $ADSdcip | select-object Forest,DomainMode,UsersContainer,ComputersContainer,InfrastructureMaster,ParentDomain,ChildDomains
+    Write-Host "---Objects---"
+    Write-Host "AD Users:"(Get-ADUser -Filter * -Server $ADSdcip).Count"(Enabled:"(Get-AdUser -Server $ADSdcip -filter 'Enabled -eq $false').count")"
+    Write-Host "AD Groups:"(Get-ADGroup -Filter * -Server $ADSdcip).Count
+    Write-Host "AD Computers:"(Get-ADComputer -Filter * -Server $ADSdcip).Count"(Enabled:"(Get-ADComputer -Server $ADSdcip -filter 'Enabled -eq $false').count")"
     Write-Host
     Write-Host "---DC Info---"
-    Get-ADDomainController -Server $domain | select-object Hostname,IPv4Address, IsReadOnly, IsGlobalCatalog,OperatingSystem,OperationMasterRoles,ComputerObjectDN | format-table
+    Get-ADDomainController -Server $ADSdcip | select-object Hostname,IPv4Address, IsReadOnly, IsGlobalCatalog,OperatingSystem,OperationMasterRoles,ComputerObjectDN | format-table
     Write-Host
     Write-Host "---Admin Groups (contain string admin)---"
-    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $domain | select-object SAMAccountName, @{l='Members';e={($_.Members.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},@{n='MemberOf';e={($_.MemberOf.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},DistinguishedName,Description |format-table
+    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADSdcip | select-object SAMAccountName, @{l='Members';e={($_.Members.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},@{n='MemberOf';e={($_.MemberOf.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},DistinguishedName,Description |format-table
     Write-Host
     Write-Host "---Users in the Admin Groups (recursive search)---"
     Write-Host
-    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $domain | get-adgroupmember -Recursive | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
+   # Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADSdcip | get-adgroupmember -Recursive -Server $ADSdcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADSdcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
     Write-Host
     Write-Host "---Misc---"
-    Get-ADObject -Identity ((Get-ADDomain -Server $domain).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $domain| select-object ms-DS-MachineAccountQuota | format-table
+    Get-ADObject -Identity ((Get-ADDomain -Server $ADSdcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADSdcip| select-object ms-DS-MachineAccountQuota
     Write-Host
-    pause
-    Show-CustomMenu
+
 }
 
 function gposearchname
 {
-
-
     Clear-Host
     Write-Host "====================================================="
     Write-Host "================== GPO Search Name =================="
@@ -414,6 +459,8 @@ function gposearchcontent
     Show-CustomMenu
 }
 
+
+
 function ADS-portcheck {
     <#
         .Synopsis
@@ -449,17 +496,21 @@ function ADS-portcheck {
     return($open)
 }
 
+function ADS-check {
+    if (!$ADSconnectioncheck) {
+        ADS-preconditioncheck
+    }
+}
+
+
 function ADS-preconditioncheck
 {
     # Check if AD commands from an ActiveDirctory modules are available
-    if (@(Get-Command -Module *ActiveDirectory*).count -gt 100) {
-        Write-Output "[+] AD Module seems to be installed"
+    if ((Get-Command -Module *ActiveDirectory*).count -gt 100) {
+        Write-host "[+] AD Module seems to be installed"
         return $true
     } else {
-        Write-host "[-] AD PS Module not available (install RSAT!)"
-        $ADSmodulebasepath = get-module -name ADscout | select-object -ExpandProperty ModuleBase
-        Set-Variable -Name ADSmodulebasepath -Value $ADSmodulebasepath -Scope Global
-        
+        Write-host "[-] AD PS Module not available (install RSAT!)"      
         # Check if dll exist if yes, import.
         Write-host "[*] Check if Microsoft.ActiveDirectory.Management.dll in module folder exist"
         if (Test-Path -Path $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll) {
@@ -475,6 +526,9 @@ function ADS-preconditioncheck
 
 function ADS-connectionchecks
 {
+    # DEBUG<------------------
+    #$domain = "lab.local"
+    #$dcip = "192.168.139.128"
     <#
         .Synopsis
         Perfoming connection checks to the domain.
@@ -489,13 +543,14 @@ function ADS-connectionchecks
             - Domain information can be tretived
         If successful it will set the global var ADSconnectioncheck to $true.
     #>
+    # Check for AD module or AD dll
     if (!(ADS-preconditioncheck)) {
         break
     }
 
     # Check for AD module or AD dll
-    if ($ADSconnectioncheck) {
-        Remove-Variable ADSconnectioncheck -Scope Global -Force
+    if ($ADScout.Connectioncheck) {
+        $ADScout.Connectioncheck = $false
     }
 
      # Check if Domain query is possible
@@ -523,7 +578,7 @@ function ADS-connectionchecks
         }
     }
    
-    while(!$ADSconnectioncheck){
+    while(!$ADScout.Connectioncheck){
         
 
         if (!$domain) {
@@ -558,7 +613,7 @@ function ADS-connectionchecks
             if (ADS-portcheck $dcip 9389) {
                 Write-Host "[+] Connection OK - TCP 9389 on"$dcip
                 Write-Host "[!] No idea whats wrong :-(" -ForegroundColor DarkRed
-                exit
+                throw
             } else {
                 Write-Host "[!] Can't connect to ADWeb Service: "$PSItem -ForegroundColor DarkRed
                 Remove-Variable dcip -Force
@@ -583,21 +638,25 @@ function ADS-connectionchecks
         #Handle unknow issues
         catch {
             Write-Host "[!] Unknow error: $PSItem" -ForegroundColor DarkRed
-            exit
+            
             #DEBUG
             $PSItem | Select-Object -Property *
+            throw
         }
 
         # Check if connection successfully if not loop
-        if (($domaintest | Measure-Object).count -gt 0) {      
-            Set-Variable -Name ADSconnectioncheck -Value $true -Scope Global
+        if (($domaintest | Measure-Object).count -gt 0) {   
+            $ADScout.Connectioncheck = $true   
+            $ADScout.Domain = $domain
+            $ADScout.Dcip = $dcip
             Write-Host "[+] Connection check successfull with:"$domain
+            #Write config to disk
+            ADS-writeconfig
         }
     }
 }
 
 ## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
-
-Export-ModuleMember -Function ADS-interactive,ADS-preconditionchecks,ADS-portcheck
+Export-ModuleMember -Function ADS-interactive,ADS-getDomainInfo,ADS-portcheck,ADS-connectionchecks
 
 #Get-Command -module ADScout | write-host
