@@ -7,6 +7,17 @@
 
 ################ INIT
 write-host "[*] Doing setup stuff"
+write-host "[*] Defining default values"
+$ADScout = [ordered]@{
+    Logfolder           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath logs)
+    Lootfolder          = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath loot)
+    EnvConfig           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
+    Module              = ($MyInvocation.MyCommand.Path)
+    Connectioncheck     = $null
+    Domain              = $null
+    Dcip                = $null
+    runas               = $null
+}
 
 #Check if config exist and attempt to load it. Load default values if failing
 if(test-path -Path ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml) -PathType Leaf) {
@@ -15,20 +26,13 @@ if(test-path -Path ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Pat
         $ADScout = Import-Clixml ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
         write-host "[+] Config imported:"
         Write-Host ($ADScout | Format-table -Force | Out-String)
+        write-host "[i] If this is wrong type to relead with default: ADS-wrongconfig"
     }
     catch {
+        ############################### only defined if loading failed but whatr is if no config exist?
         write-host "[-] Config does not work"$PSItem
-        write-host "[*] Renaming failed config to envconfig.xml.failed"
+        write-host "[*] Renaming failed config to 'envconfig.xml.failed'"
         Rename-Item -Path $ADScout.EnvConfig -NewName "envconfig.xml.failed"
-        write-host "[*] Defining default values"
-        $ADScout = [ordered]@{
-            Logfolder           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath logs)
-            Lootfolder          = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath loot)
-            EnvConfig           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
-            Connectioncheck     = $null
-            Domain              = $null
-            Dcip                = $null
-        }
     }
 }
 
@@ -44,8 +48,53 @@ If(!(test-path -PathType container $ADScout.Lootfolder)) {
 
 #Write config in case new values etc.
 function ADS-writeconfig {
+    write-host "[*] Saving config:"$ADScout.EnvConfig
     $ADScout | Export-Clixml $ADScout.EnvConfig
 }
+
+function ADS-wrongconfig {
+    write-host "[*] Renaming config and reload module"
+    If((test-path -PathType Leaf $ADScout.EnvConfig)) {
+        Rename-Item -Path $ADScout.EnvConfig -NewName "envconfig.xml.wrong"
+    }
+    import-module $ADScout.Module -force -DisableNameChecking
+}
+
+#Function to reload with new config
+function ADS-writelogandoutput {
+    $ADScout | Export-Clixml $ADScout.EnvConfig
+}
+
+#Function to spawn a new shell with the same use
+function ADS-cpshell {
+    ADS-detectrunas
+    if($ADScout.runas) {
+        write-host "[+] Staring new shell as"$ADScout.runas
+        runas /netonly /user:$($ADScout.runas) "powershell.exe -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking"
+    } else {
+        write-host "[*] Not in a different usercontext, starting normal shell"
+        Start-Process pwsh -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking
+        ################# BUG!!!!!!!!!!!!!!!!!!!
+    }
+    
+}
+function ADS-detectrunas {
+    $windowtitle=$host.UI.RawUI.WindowTitle
+    $values = @('wird als','running as')
+    $regexValues = [string]::Join('|',$values) 
+    if($windowtitle -match $regexValues ){
+        $windowtitle = $windowtitle -split ("\(|\)")
+        $windowtitle = $windowtitle[1] -split (" ")
+        $useranddomain = $windowtitle[2]
+        $ADScout.runas = $useranddomain 
+        write-host "[+] Script Running as" $ADScout.runas
+        
+        
+    } else {
+        $ADScout.runas = $false
+    }
+}
+
 
 function ADS-writelogandoutput {
     $ADScout | Export-Clixml $ADScout.EnvConfig
@@ -96,6 +145,37 @@ function ADS-interactive
         }
 }
 
+
+function ADS-getDomainInfo
+{
+    ADS-check
+    #Clear-Host
+    Write-Host "======================================================"
+    Write-Host "=================== GET Domain Info =================="
+    Write-Host "======================================================"
+    Write-Host
+    Write-Host "---Domain Info---"
+    Get-ADDomain -Server $ADScout.dcip | select-object Forest,DomainMode,UsersContainer,ComputersContainer,InfrastructureMaster,ParentDomain,ChildDomains
+    Write-Host "---Objects---"
+    Write-Host "AD Users:"(Get-ADUser -Filter * -Server $ADScout.dcip).Count"(Enabled:"(Get-AdUser -Server $ADScout.dcip -filter 'Enabled -eq $false').count")"
+    Write-Host "AD Groups:"(Get-ADGroup -Filter * -Server $ADScout.dcip).Count
+    Write-Host "AD Computers:"(Get-ADComputer -Filter * -Server $ADScout.dcip).Count"(Enabled:"(Get-ADComputer -Server $ADScout.dcip -filter 'Enabled -eq $false').count")"
+    Write-Host
+    Write-Host "---DC Info---"
+    Get-ADDomainController -Server $ADScout.dcip | select-object Hostname,IPv4Address, IsReadOnly, IsGlobalCatalog,OperatingSystem,OperationMasterRoles,ComputerObjectDN | format-table
+    Write-Host
+    Write-Host "---Admin Groups (contain string admin)---"
+    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | select-object SAMAccountName, @{l='Members';e={($_.Members.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},@{n='MemberOf';e={($_.MemberOf.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},DistinguishedName,Description |format-table
+    Write-Host
+    Write-Host "---Users in the Admin Groups (recursive search)---"
+    Write-Host
+   # Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADSdcip | get-adgroupmember -Recursive -Server $ADSdcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADSdcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
+    Write-Host
+    Write-Host "---Misc---"
+    Get-ADObject -Identity ((Get-ADDomain -Server $ADScout.dcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADScout.dcip| select-object ms-DS-MachineAccountQuota
+    Write-Host
+
+}
 function fulluserexport
 {
     Clear-Host
@@ -304,37 +384,6 @@ function monitorelockouts
     
 }
 
-function ADS-getDomainInfo
-{
-    ADS-check
-    #Clear-Host
-    Write-Host "======================================================"
-    Write-Host "=================== GET Domain Info =================="
-    Write-Host "======================================================"
-    Write-Host
-    Write-Host "---Domain Info---"
-    Get-ADDomain -Server $ADSdcip | select-object Forest,DomainMode,UsersContainer,ComputersContainer,InfrastructureMaster,ParentDomain,ChildDomains
-    Write-Host "---Objects---"
-    Write-Host "AD Users:"(Get-ADUser -Filter * -Server $ADSdcip).Count"(Enabled:"(Get-AdUser -Server $ADSdcip -filter 'Enabled -eq $false').count")"
-    Write-Host "AD Groups:"(Get-ADGroup -Filter * -Server $ADSdcip).Count
-    Write-Host "AD Computers:"(Get-ADComputer -Filter * -Server $ADSdcip).Count"(Enabled:"(Get-ADComputer -Server $ADSdcip -filter 'Enabled -eq $false').count")"
-    Write-Host
-    Write-Host "---DC Info---"
-    Get-ADDomainController -Server $ADSdcip | select-object Hostname,IPv4Address, IsReadOnly, IsGlobalCatalog,OperatingSystem,OperationMasterRoles,ComputerObjectDN | format-table
-    Write-Host
-    Write-Host "---Admin Groups (contain string admin)---"
-    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADSdcip | select-object SAMAccountName, @{l='Members';e={($_.Members.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},@{n='MemberOf';e={($_.MemberOf.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},DistinguishedName,Description |format-table
-    Write-Host
-    Write-Host "---Users in the Admin Groups (recursive search)---"
-    Write-Host
-   # Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADSdcip | get-adgroupmember -Recursive -Server $ADSdcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADSdcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
-    Write-Host
-    Write-Host "---Misc---"
-    Get-ADObject -Identity ((Get-ADDomain -Server $ADSdcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADSdcip| select-object ms-DS-MachineAccountQuota
-    Write-Host
-
-}
-
 function gposearchname
 {
     Clear-Host
@@ -524,6 +573,7 @@ function ADS-preconditioncheck
     }
 }
 
+
 function ADS-connectionchecks
 {
     # DEBUG<------------------
@@ -563,19 +613,7 @@ function ADS-connectionchecks
         Write-host "[-] Current host is not member of a Domain"
         [bool] $domjoined = 0;
         #Detect runas
-        $windowtitle=$host.UI.RawUI.WindowTitle
-        $values = @('wird als','running as')
-        $regexValues = [string]::Join('|',$values) 
-        if($windowtitle -match $regexValues ){
-            $windowtitle = $windowtitle -split ("\(|\)")
-            $windowtitle = $windowtitle[1] -split (" ")
-            write-host "[+] Script Running as" $windowtitle[2]
-            [bool] $isrunas = 1;
-        } else {
-            [bool] $isrunas = 0;
-            write-host "[-] Not running in a different user context" -ForegroundColor DarkRed
-            
-        }
+        ADS-detectrunas
     }
    
     while(!$ADScout.Connectioncheck){
@@ -657,6 +695,8 @@ function ADS-connectionchecks
 }
 
 ## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
-Export-ModuleMember -Function ADS-interactive,ADS-getDomainInfo,ADS-portcheck,ADS-connectionchecks
+#Export-ModuleMember -Function ADS-interactive,ADS-getDomainInfo,ADS-portcheck,
+Export-ModuleMember -function *
+
 
 #Get-Command -module ADScout | write-host
