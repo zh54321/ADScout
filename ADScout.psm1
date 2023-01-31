@@ -13,10 +13,13 @@ $ADScout = [ordered]@{
     Lootfolder          = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath loot)
     EnvConfig           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
     Module              = ($MyInvocation.MyCommand.Path)
+    DN                  = $null
     Connectioncheck     = $null
     Domain              = $null
     Dcip                = $null
     runas               = $null
+    DnsOK               = $null
+    UseDLL              = $null
 }
 
 #Check if config exist and attempt to load it. Load default values if failing
@@ -26,6 +29,16 @@ if(test-path -Path ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Pat
         $ADScout = Import-Clixml ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
         write-host "[+] Config imported:"
         Write-Host ($ADScout | Format-table -Force | Out-String)
+        if($ADSScout.UseDLL) {
+            write-host "[*] According to config the Microsoft.ActiveDirectory.Management.dll was used."
+            if (Test-Path -Path $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll) {
+                Write-host "[+] DLL exist. Importing..."
+                import-module $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll -WarningAction silentlyContinue
+                Write-host "[!] Not all functionalities tested. Use at own risk..."
+            } else {
+                Write-host "[!] No AD PS module or Microsoft.ActiveDirectory.Management.dll found." -ForegroundColor DarkRed
+            }
+        }
         write-host "[i] If this is wrong type to relead with default: ADS-wrongconfig"
     }
     catch {
@@ -67,6 +80,21 @@ function ADS-writelogandoutput {
 
 #Function to spawn a new shell with the same use
 function ADS-cpshell {
+    <#
+        .SYNOPSIS
+        Start a new shell (same run as user) and import the module + config
+        
+        .DESCRIPTION
+        The function checks if the shell runs as another user (based on windows title) and starts a new shell.
+        In the new shell the ADScout module is imported and the config is loaded (if present).
+        No parameters...
+
+        .EXAMPLE
+        ADS-cpshell
+
+        .LINK
+        https://github.com/zh54321/ADScout
+    #>
     ADS-detectrunas
     if($ADScout.runas) {
         write-host "[+] Staring new shell as"$ADScout.runas
@@ -98,6 +126,67 @@ function ADS-detectrunas {
 
 function ADS-writelogandoutput {
     $ADScout | Export-Clixml $ADScout.EnvConfig
+}
+
+#Function to check if credentials are valid
+function ADS-testcred {
+    <#
+        .SYNOPSIS
+        Test the credential of a user
+        
+        .DESCRIPTION
+        Test the credential of a user. The user will be defined interactivly.
+        No parameters...
+
+        .EXAMPLE
+        ADS-testcred
+
+        .LINK
+        https://github.com/zh54321/ADScout
+    #>
+    $cred = Get-Credential -Credential "$($ADScout.domain)\"
+    if ($ADScout.DnsOK) { ## DEBUG: TEST on System with DNS
+        write-host "[+] DNS OK using System.DirectoryServices.DirectoryEntry method"
+        write-host "[i] Enter username (no domain needed) and password."
+        $username = $cred.username
+        $password = $cred.GetNetworkCredential().password
+    
+        # Get current domain using logged-on user's credentials
+        $CurrentDomain = "LDAP://" + $ADScout.DN
+        write-host "[*] Testing credentials for:"+$username
+        $domain = New-Object System.DirectoryServices.DirectoryEntry($CurrentDomain,$UserName,$Password)
+    
+        if ($domain.name -eq $null) {
+            write-host "[-] Auth failed."
+        } else {
+            write-host "[+] Successfully authenticated with domain $domain.name"
+        }
+
+    } else {
+        write-host "[-] DNS NOK (re-run ADS-Connectioncheck again if you think otherwise)"
+        write-host "[*] Using get-addomain for test."
+
+        #Ensure var does not exit
+        if($domaintest) {
+            remove-variable $domaintest -Force
+        }
+        # Test auth
+        try {
+            $credentialtest = get-addomain -Credential $cred -Identity $ADScout.domain -Server $ADScout.dcip -ErrorAction Stop          
+        }         
+        #Handle auth issues
+        catch [System.Security.Authentication.AuthenticationException] {
+            Write-Host "[-] Credentials not valid! $PSItem" -ForegroundColor DarkRed
+        }
+        catch {
+            Write-Host "[!] Something else went wrong: $PSItem" -ForegroundColor DarkRed
+        }
+
+        if (($credentialtest | Measure-Object).count -gt 0) { 
+            write-host "[+] Successfully authenticated with:"$cred.UserName
+        }
+    }
+
 }
 
 function ADS-interactive
@@ -169,12 +258,11 @@ function ADS-getDomainInfo
     Write-Host
     Write-Host "---Users in the Admin Groups (recursive search)---"
     Write-Host
-   # Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADSdcip | get-adgroupmember -Recursive -Server $ADSdcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADSdcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
+    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | get-adgroupmember -Recursive -Server $ADScout.dcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADScout.dcipp | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
     Write-Host
     Write-Host "---Misc---"
     Get-ADObject -Identity ((Get-ADDomain -Server $ADScout.dcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADScout.dcip| select-object ms-DS-MachineAccountQuota
     Write-Host
-
 }
 function fulluserexport
 {
@@ -565,6 +653,8 @@ function ADS-preconditioncheck
         if (Test-Path -Path $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll) {
             Write-host "[+] DLL exist. Importing..."
             import-module $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll -WarningAction silentlyContinue
+            $ADSScout.UseDLL = $true
+            Write-host "[!] Not all functionalities tested. Use at own risk..."
             return $true
         } else {
             Write-host "[!] No AD PS module or Microsoft.ActiveDirectory.Management.dll found." -ForegroundColor DarkRed
@@ -630,6 +720,7 @@ function ADS-connectionchecks
                 #if valid domain used and can be resolved take the first dc ip.
                 $dcip = Resolve-DnsName -Type A -Name $domain -ErrorAction Stop | select-object -ExpandProperty IPAddress -First 1
                 Write-host "[+] Domainname can be resolved:"$dcip
+                $ADScout.DnsOK = $true
             } catch {
                 Write-Host "[-] Can't resolve (DNS):"$domain
                 $dcip = Read-Host "[i] Specify DC IP"
@@ -638,14 +729,12 @@ function ADS-connectionchecks
 
         #Verify reachability of the Domain and if the right domainname provided
         Write-Host "[*] Trying to get domain info from:"$domain" using DC IP: "$dcip
-        try
-        {
+        try {
             $domaintest = get-addomain -Identity $domain -Server $dcip -ErrorAction Stop          
         } 
         
         #Handle auth issues
-        catch [Microsoft.ActiveDirectory.Management.ADServerDownException]
-        {
+        catch [Microsoft.ActiveDirectory.Management.ADServerDownException] {
             Write-Host "[!] Connection issue: $PSItem" -ForegroundColor DarkRed
             Write-Host "[*] Test connection: TCP 9389 on"$dcip
             if (ADS-portcheck $dcip 9389) {
@@ -659,8 +748,7 @@ function ADS-connectionchecks
         }
 
         #Handle auth issues
-        catch [System.Security.Authentication.AuthenticationException] 
-        {
+        catch [System.Security.Authentication.AuthenticationException] {
             Write-Host "[!] Access issue: $PSItem" -ForegroundColor DarkRed
             Write-Host "[!] Important: If not domain joined, start the powershell: runas /netonly /user:%domain%\%user% powershell" -ForegroundColor DarkRed
             exit
@@ -687,6 +775,7 @@ function ADS-connectionchecks
             $ADScout.Connectioncheck = $true   
             $ADScout.Domain = $domain
             $ADScout.Dcip = $dcip
+            $ADScout.DN = $domaintest.DistinguishedName
             Write-Host "[+] Connection check successfull with:"$domain
             #Write config to disk
             ADS-writeconfig
