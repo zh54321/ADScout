@@ -160,8 +160,8 @@ function ADS-cpshell {
         start-process powershell "import-module $($ADScout.Module)"
         ################# BUG!!!!!!!!!!!!!!!!!!!
     }
-    
 }
+
 function ADS-detectrunas {
     $windowtitle=$host.UI.RawUI.WindowTitle
     $values = @('wird als','running as')
@@ -171,9 +171,7 @@ function ADS-detectrunas {
         $windowtitle = $windowtitle[1] -split (" ")
         $useranddomain = $windowtitle[2]
         $ADScout.runas = $useranddomain 
-        write-host "[+] Script Running as" $ADScout.runas
-        
-        
+        write-host "[+] Script Running as" $ADScout.runas      
     } else {
         $ADScout.runas = $false
     }
@@ -705,9 +703,9 @@ function ADS-preconditioncheck
         Write-host "[-] AD PS Module not available (install RSAT!)"      
         # Check if dll exist if yes, import.
         Write-host "[*] Check if Microsoft.ActiveDirectory.Management.dll in module folder exist"
-        if (Test-Path -Path $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll) {
+        if (Test-Path -Path $ADSmodulebasepath\ADdll.psm1) {
             Write-host "[+] DLL exist. Importing..."
-            import-module $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll -WarningAction silentlyContinue
+            import-module $ADSmodulebasepath\ADdll.psm1 -WarningAction silentlyContinue
             $ADSScout.UseDLL = $true
             Write-host "[!] Not all functionalities tested. Use at own risk..."
             return $true
