@@ -5,8 +5,46 @@
   A module to help with common task in an AD pentest.
 #>
 
+function ADS-title {
+    <#
+        .Synopsis
+        Adjust the PS WIndow Title
+        .DESCRIPTION
+        Rename the window title to find in better in the taskbar.
+        If the console runs in another user context (run as) this information will be preserved.
+        .Parameter newtitle
+        Title string
+        .Example
+        ADS-title Recon
+        .LINK
+        https://github.com/zh54321/ADScout
+    #>
+    Param($newtitle)
+    $windowtitle=$host.UI.RawUI.WindowTitle
+    $values = @('wird als','running as')
+    $regexValues = [string]::Join('|',$values) 
+    if($windowtitle -match $regexValues ){
+        $windowtitle = $windowtitle -split ("\(|\)")
+        $host.ui.RawUI.WindowTitle = "ADS: $newtitle ($($windowtitle[1]))"
+    } else {
+        $host.ui.RawUI.WindowTitle = "ADS: $newtitle"
+    }
+
+}
+
 ################ INIT
+write-host ' ____________________________________________________'
+write-host '|[] PowerShell                                 _ II x|'
+write-host '|""""""""""""""""""""""""""""""""""""""""""""""""""|"|'
+write-host '|PS:C\> write-host "ADScout"                       | |'
+write-host '| _  _  __                                         | |'
+write-host '||_|| \(_  _  _    _|_                             | |'
+write-host '|| ||_/__)(_ (_)|_| |_                             | |'
+write-host '|__________________________________________________|_|'
 write-host "[*] Doing setup stuff"
+write-host "[*] Changeing title (use 'ADS-title %String%' to change it)"
+ADS-title PowerShell
+cd ($MyInvocation.MyCommand.Path | Split-Path -Parent)
 write-host "[*] Defining default values"
 $ADScout = [ordered]@{
     Logfolder           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath logs)
@@ -31,15 +69,9 @@ if(test-path -Path ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Pat
         Write-Host ($ADScout | Format-table -Force | Out-String)
         if($ADSScout.UseDLL) {
             write-host "[*] According to config the Microsoft.ActiveDirectory.Management.dll was used."
-            if (Test-Path -Path $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll) {
-                Write-host "[+] DLL exist. Importing..."
-                import-module $ADSmodulebasepath\Microsoft.ActiveDirectory.Management.dll -WarningAction silentlyContinue
-                Write-host "[!] Not all functionalities tested. Use at own risk..."
-            } else {
-                Write-host "[!] No AD PS module or Microsoft.ActiveDirectory.Management.dll found." -ForegroundColor DarkRed
-            }
+            ADS-preconditioncheck
         }
-        write-host "[i] If this is wrong type to relead with default: ADS-wrongconfig"
+        write-host "[i] If this is wrong, type to relead with default: ADS-wrongconfig"
     }
     catch {
         ############################### only defined if loading failed but whatr is if no config exist?
@@ -74,8 +106,31 @@ function ADS-wrongconfig {
 }
 
 #Function to reload with new config
-function ADS-writelogandoutput {
-    $ADScout | Export-Clixml $ADScout.EnvConfig
+function ADS-title {
+    <#
+        .Synopsis
+        Adjust the PS WIndow Title
+        .DESCRIPTION
+        Rename the window title to find in better in the taskbar.
+        If the console runs in another user context (run as) this information will be preserved.
+        .Parameter newtitle
+        Title string
+        .Example
+        ADS-title Recon
+        .LINK
+        https://github.com/zh54321/ADScout
+    #>
+    Param($newtitle)
+    $windowtitle=$host.UI.RawUI.WindowTitle
+    $values = @('wird als','running as')
+    $regexValues = [string]::Join('|',$values) 
+    if($windowtitle -match $regexValues ){
+        $windowtitle = $windowtitle -split ("\(|\)")
+        $host.ui.RawUI.WindowTitle = "ADS: $newtitle ($($windowtitle[1]))"
+    } else {
+        $host.ui.RawUI.WindowTitle = "ADS: $newtitle"
+    }
+
 }
 
 #Function to spawn a new shell with the same use
@@ -102,6 +157,7 @@ function ADS-cpshell {
     } else {
         write-host "[*] Not in a different usercontext, starting normal shell"
         Start-Process pwsh -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking
+        start-process powershell "import-module $($ADScout.Module)"
         ################# BUG!!!!!!!!!!!!!!!!!!!
     }
     
@@ -125,7 +181,7 @@ function ADS-detectrunas {
 
 
 function ADS-writelogandoutput {
-    $ADScout | Export-Clixml $ADScout.EnvConfig
+    #Todo
 }
 
 #Function to check if credentials are valid
@@ -140,7 +196,6 @@ function ADS-testcred {
 
         .EXAMPLE
         ADS-testcred
-
         .LINK
         https://github.com/zh54321/ADScout
     #>
@@ -167,8 +222,8 @@ function ADS-testcred {
         write-host "[*] Using get-addomain for test."
 
         #Ensure var does not exit
-        if($domaintest) {
-            remove-variable $domaintest -Force
+        if($credentialtest) {
+            remove-variable credentialtest -Force
         }
         # Test auth
         try {
@@ -176,7 +231,7 @@ function ADS-testcred {
         }         
         #Handle auth issues
         catch [System.Security.Authentication.AuthenticationException] {
-            Write-Host "[-] Credentials not valid! $PSItem" -ForegroundColor DarkRed
+            Write-Host "[-] Credentials not valid: $PSItem" -ForegroundColor DarkRed
         }
         catch {
             Write-Host "[!] Something else went wrong: $PSItem" -ForegroundColor DarkRed
@@ -635,7 +690,7 @@ function ADS-portcheck {
 
 function ADS-check {
     if (!$ADSconnectioncheck) {
-        ADS-preconditioncheck
+        ADS-connectionchecks
     }
 }
 
@@ -666,9 +721,6 @@ function ADS-preconditioncheck
 
 function ADS-connectionchecks
 {
-    # DEBUG<------------------
-    #$domain = "lab.local"
-    #$dcip = "192.168.139.128"
     <#
         .Synopsis
         Perfoming connection checks to the domain.
@@ -681,8 +733,9 @@ function ADS-connectionchecks
             - DC is reachable on port 9389 (AD Webservice)
             - User has the rights to query (either use the local credentials or use runas)
             - Domain information can be tretived
-        If successful it will set the global var ADSconnectioncheck to $true.
+        If successful it will set the global var ADSconnectioncheck to $true and write config (to skip the checks next time)
     #>
+
     # Check for AD module or AD dll
     if (!(ADS-preconditioncheck)) {
         break
