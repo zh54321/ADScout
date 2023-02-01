@@ -34,7 +34,7 @@ function ADS-title {
 
 ################ INIT
 write-host ' ____________________________________________________'
-write-host '|[] PowerShell                                 _ II x|'
+write-host '|[] PowerShell                                 _ [] x|'
 write-host '|""""""""""""""""""""""""""""""""""""""""""""""""""|"|'
 write-host '|PS:C\> write-host "ADScout"                       | |'
 write-host '| _  _  __                                         | |'
