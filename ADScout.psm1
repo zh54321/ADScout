@@ -1,8 +1,10 @@
 <#
- .Synopsis
-  AD Pentest Helper
- .Description
-  A module to help with common task in an AD pentest.
+    .Synopsis
+    AD Pentest Helper
+    .Description
+    A module to help with common task in an AD pentest.
+    .LINK
+    https://github.com/zh54321/ADScout
 #>
 
 function ADS-title {
@@ -90,6 +92,19 @@ If(!(test-path -PathType container $ADScout.Lootfolder)) {
     New-Item -ItemType Directory -Path $ADScout.Lootfolder
 }
 
+function ADS-commands {
+    <#
+        .Synopsis
+        Show the exported commands of the module
+        .Example
+        ADS-commands
+        .LINK
+        https://github.com/zh54321/ADScout
+    #>
+    Get-Module ADScout | % { $_.ExportedCommands.Values} | % {get-help $_} | ft name, synopsis
+}
+
+
 
 #Write config in case new values etc.
 function ADS-writeconfig {
@@ -116,7 +131,7 @@ function ADS-title {
         .Parameter newtitle
         Title string
         .Example
-        ADS-title Recon
+        ADS-title Snaffler
         .LINK
         https://github.com/zh54321/ADScout
     #>
@@ -290,7 +305,7 @@ function ADS-interactive
 
 function ADS-getDomainInfo
 {
-    ADS-check
+    ADS-checkpreconditions
     #Clear-Host
     Write-Host "======================================================"
     Write-Host "=================== GET Domain Info =================="
@@ -329,34 +344,17 @@ function fulluserexport
     Show-CustomMenu
 }
 
-function pwsprayinguserexport
+function ADS-expwspraying
 {
-    Clear-Host
-    Write-Host "====================================================="
-    Write-Host "============= User Export for PW Spraying============"
-    Write-Host "====================================================="
-    Write-Host 
-    Write-Host "Searching for Accounts which are: Enabled, not locked, 0 badpwCount, PW is not expired"
-    Write-Host
-    $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired -Filter {Enabled -eq "true"} -Server $domain | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0-and $_.PasswordExpired -eq 0} | Select-Object SamAccountName -ExpandProperty SamAccountName
-    Write-Host "Found"$table.count "Users. Usernames exportet to users_pw_spraying.txt"
-
-    $domain = Get-ADDomain -Server $domain | select-object PDCEmulator,Forest
-    Write-Host 
-    Write-Host "Perform PW spraying with:"
-    Write-Host "./kerbrute_linux_amd64 passwordspray -d"$domain.Forest"--dc"$domain.PDCEmulator"users_pw_spraying.txt 'Sommer2020!'"
-    $table | Out-File -Encoding utf8 -FilePath users_pw_spraying.txt
-    Write-Host 
-    Write-Host 
-    Write-Host "================ Options ================"
-    
-    $monlockouts = Read-Host "Monitore Lockouts? (y/n)"
-    # Select option
-    switch ($monlockouts){
-         'y' {monitorelockouts}
-         'n' {Show-CustomMenu}
-     }
-     Show-CustomMenu
+    Write-Host ""
+    Write-Host "[*] Start -------Export Users for PW Spray-------"
+    Write-Host "[*] Searching users which are: Enabled, not locked, no badpwdcount"
+    $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | Select-Object SamAccountName -ExpandProperty SamAccountName
+    Write-Host "[+] Found"$table.count "Users"
+    Write-Host "[*] Export to $($ADScout.Lootfolder)\users_pw_spraying.txt"
+    $table | Out-File -Encoding utf8 -FilePath (Join-Path -Path $ADScout.Lootfolder -ChildPath "users_pw_spraying.txt")
+    Write-Host "[*] ./kerbrute_linux_amd64 passwordspray -d"$ADScout.Domain"--dc"$ADScout.Dcip"users_pw_spraying.txt 'Sommer2022!' --safe" 
+    Write-Host "[*] Use ADS-XXXXXX to monitore the lockouts"
 }
 
 function vulnuserexport
@@ -495,7 +493,7 @@ function showvulnuser
 
 function checkuser
 {
-    Clear-Host
+
     Write-Host "===================================================="
     Write-Host "================ Check User Details ================"
     Write-Host "===================================================="
@@ -503,7 +501,7 @@ function checkuser
     Get-ADUser -Identity $user -Properties * -Server $domain
     write-host "test"
     pause
-    Show-CustomMenu 
+    Show-CustomMenu
 }
 
 function monitorelockouts
@@ -686,7 +684,11 @@ function ADS-portcheck {
     return($open)
 }
 
-function ADS-check {
+function ADS-checkpreconditions {
+    <#
+        .Synopsis
+        Checking if preconditions are met (internal only)
+    #>
     if (!$ADSconnectioncheck) {
         ADS-connectionchecks
     }
@@ -835,8 +837,8 @@ function ADS-connectionchecks
 }
 
 ## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
-#Export-ModuleMember -Function ADS-interactive,ADS-getDomainInfo,ADS-portcheck,
-Export-ModuleMember -function *
+Export-ModuleMember -Function ADS-commands,ADS-getDomainInfo,ADS-connectionchecks,ADS-cpshell,ADS-testcred,ADS-title,ADS-expwspraying
+#Export-ModuleMember -function *
 
 
 #Get-Command -module ADScout | write-host
