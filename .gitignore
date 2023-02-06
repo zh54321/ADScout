@@ -3,3 +3,4 @@ todo.txt
 envconfig.xml
 envconfig.xml.failed
 loot/users_pw_spraying.txt
+logs/*

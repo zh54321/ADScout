@@ -10,6 +10,7 @@ Main functions:
 - Easy rename of windows titles to find the right window on the taskbar
 - Easy credential testing
 - Quick single port check (much faster than test-netconnection)
+- Can run as an in-memory function (New-Module -Name ADScout -ScriptBlock {Paste here} )
 
 Planned:
 - Auth test on users which are allowed to have an empty password

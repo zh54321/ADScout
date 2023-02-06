@@ -46,51 +46,61 @@ write-host '|__________________________________________________|_|'
 write-host "[*] Doing setup stuff"
 write-host "[*] Changeing title (use 'ADS-title %String%' to change it)"
 ADS-title PowerShell
-cd ($MyInvocation.MyCommand.Path | Split-Path -Parent)
-write-host "[*] Defining default values"
-$ADScout = [ordered]@{
-    Logfolder           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath logs)
-    Lootfolder          = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath loot)
-    EnvConfig           = ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
-    Module              = ($MyInvocation.MyCommand.Path)
-    DN                  = $null
-    Connectioncheck     = $null
-    Domain              = $null
-    Dcip                = $null
-    runas               = $null
-    DnsOK               = $null
-    UseDLL              = $null
-}
-
-#Check if config exist and attempt to load it. Load default values if failing
-if(test-path -Path ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml) -PathType Leaf) {
-    write-host "[+] Config file detected. Try to load.."
-    try {
-        $ADScout = Import-Clixml ($MyInvocation.MyCommand.Path | Split-Path -Parent | Join-Path -ChildPath envconfig.xml)
-        write-host "[+] Config imported:"
-        Write-Host ($ADScout | Format-table -Force | Out-String)
-        if($ADSScout.UseDLL) {
-            write-host "[*] According to config the Microsoft.ActiveDirectory.Management.dll was used."
-            ADS-preconditioncheck
+if (!($MyInvocation.MyCommand)) {
+    write-host "[*] Fileless mode detected"
+    write-host "[*] Defining default values (fileless)"
+    $ADScout = [ordered]@{
+        DN                  = $null
+        Connectioncheck     = $null
+        Domain              = $null
+        Dcip                = $null
+        runas               = $null
+        DnsOK               = $null
+        UseDLL              = $null
+        Fileless            = $true
+    }
+    New-Variable -Name ADScout -Value $ADScout -Scope Global -Force
+} else {
+    write-host "[*] Defining default values"
+    $ADScout = [ordered]@{
+        OutFolder           = (Split-Path -Parent $MyInvocation.MyCommand.Path | Join-Path -ChildPath ads_out)
+        EnvConfig           = (Split-Path -Parent $MyInvocation.MyCommand.Path | Join-Path -ChildPath envconfig.xml)
+        Module              = ($MyInvocation.MyCommand.Path)
+        DN                  = $null
+        Connectioncheck     = $null
+        Domain              = $null
+        Dcip                = $null
+        runas               = $null
+        DnsOK               = $null
+        UseDLL              = $null
+        Fileless            = $false
+    }
+    New-Variable -Name ADScout -Value $ADScout -Scope Global -Force
+    #Check if config exist and attempt to load it. Load default values if failing
+    if(test-path -Path ($ADScout.EnvConfig) -PathType Leaf) {
+        write-host "[+] Config file detected. Try to load.."
+        try {
+            $ADScout = Import-Clixml ($ADScout.EnvConfig)
+            write-host "[+] Config imported:"
+            Write-Host ($ADScout | Format-table -Force | Out-String)
+            if($ADSScout.UseDLL) {
+                write-host "[*] According to config the Microsoft.ActiveDirectory.Management.dll was used."
+                ADS-preconditioncheck
+            }
+            write-host "[i] If this is wrong, type to relead with default: ADS-wrongconfig"
         }
-        write-host "[i] If this is wrong, type to relead with default: ADS-wrongconfig"
+        catch {
+            ############################### only defined if loading failed but whatr is if no config exist?
+            write-host "[-] Config does not work"$PSItem
+            write-host "[*] Renaming failed config to 'envconfig.xml.failed'"
+            Rename-Item -Path $ADScout.EnvConfig -NewName "envconfig.xml.failed"
+        }
     }
-    catch {
-        ############################### only defined if loading failed but whatr is if no config exist?
-        write-host "[-] Config does not work"$PSItem
-        write-host "[*] Renaming failed config to 'envconfig.xml.failed'"
-        Rename-Item -Path $ADScout.EnvConfig -NewName "envconfig.xml.failed"
+    If(!(test-path -PathType container $ADScout.OutFolder)) {
+        New-Item -ItemType Directory -Path $ADScout.OutFolder
     }
 }
 
-New-Variable -Name ADScout -Value $ADScout -Scope Global -Force
-
-If(!(test-path -PathType container $ADScout.Logfolder)) {
-    New-Item -ItemType Directory -Path $ADScout.Logfolder
-}
-If(!(test-path -PathType container $ADScout.Lootfolder)) {
-    New-Item -ItemType Directory -Path $ADScout.Lootfolder
-}
 
 function ADS-commands {
     <#
@@ -108,8 +118,10 @@ function ADS-commands {
 
 #Write config in case new values etc.
 function ADS-writeconfig {
-    write-host "[*] Saving config:"$ADScout.EnvConfig
-    $ADScout | Export-Clixml $ADScout.EnvConfig
+    if (!($ADScout.fileless)) {
+        write-host "[*] Saving config:"$ADScout.EnvConfig
+        $ADScout | Export-Clixml $ADScout.EnvConfig
+    }
 }
 
 function ADS-wrongconfig {
@@ -165,16 +177,21 @@ function ADS-cpshell {
         .LINK
         https://github.com/zh54321/ADScout
     #>
-    ADS-detectrunas
-    if($ADScout.runas) {
-        write-host "[+] Staring new shell as"$ADScout.runas
-        runas /netonly /user:$($ADScout.runas) "powershell.exe -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking"
+    if(!$ADS.fileless) {
+        ADS-detectrunas
+        if($ADScout.runas) {
+            write-host "[+] Staring new shell as"$ADScout.runas
+            runas /netonly /user:$($ADScout.runas) "powershell.exe -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking"
+        } else {
+            write-host "[*] Not in a different usercontext, starting normal shell"
+            Start-Process pwsh -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking
+            start-process powershell "import-module $($ADScout.Module)"
+            ################# BUG!!!!!!!!!!!!!!!!!!!
+        }
     } else {
-        write-host "[*] Not in a different usercontext, starting normal shell"
-        Start-Process pwsh -exec bypass -NoExit -Command import-module $($ADScout.Module) -force -DisableNameChecking
-        start-process powershell "import-module $($ADScout.Module)"
-        ################# BUG!!!!!!!!!!!!!!!!!!!
+        write-host "[!] Currently not available in fileless mode"
     }
+
 }
 
 function ADS-detectrunas {
@@ -186,15 +203,74 @@ function ADS-detectrunas {
         $windowtitle = $windowtitle[1] -split (" ")
         $useranddomain = $windowtitle[2]
         $ADScout.runas = $useranddomain 
-        write-host "[+] Script Running as" $ADScout.runas      
+        write-host "[+] Script Running as" $ADScout.runas
     } else {
         $ADScout.runas = $false
     }
 }
 
 
-function ADS-writelogandoutput {
-    #Todo
+
+
+
+function ADS-out {
+    #[cmdletbinding()]
+    <#
+        .Synopsis
+        Write to to Screen and logfile, export to file
+        .DESCRIPTION
+        Used to keep track of what has been done
+        .Parameter action
+        Actions: 
+        Write only to log no output: logonly
+        Write to log and output (default):logandout
+        Export to file: export
+        Export to file CSV: export
+        .Parameter module
+        Used as prefix of the logfile
+        .Parameter object
+        Stuff to log/export
+        .Example
+        ADS-writelogandoutput "Test"
+        .Example
+        ADS-writelogandoutput "Module" $Result
+    #>
+    param
+    (
+        [String[]]
+        $action = "logandprint",
+        [String[]]
+        $function = "custom",
+        [Parameter(Mandatory,ValueFromPipeline)]
+        [object]
+        $object
+    )
+    $all = @($input)
+    $date = Get-Date -Format "yyyyMMdd"
+    $date_ext = Get-Date -Format "yyyyMMdd_hhmmss"
+    
+    if $ADScout.Fileless {
+        $ADScout.OutFolder = $pwd.path
+    }
+    
+    switch ($action){
+        "logandprint" {
+            $Logfile = Join-Path $ADScout.OutFolder "\" ("log_"+$function+"_"+$date+".txt")
+            Tee-Object -InputObject $all -FilePath $Logfile -Append
+        }
+        "logonly" {
+            $Logfile = Join-Path $ADScout.OutFolder "\" ("log_"+$function+"_"+$date+".txt")
+            $all | Out-File -FilePath $Logfile -Append
+        }
+        "export" {
+            $Logfile = Join-Path $ADScout.OutFolder "\" ("export_"+$function+"_"+$date_ext+".txt")
+            $all | Out-File -FilePath $Logfile -Append
+        }
+        "exportcsv" {
+            $Logfile = Join-Path $ADScout.OutFolder "\" ("export_"+$function+"_"+$date_ext+".csv")
+            $all | Export-Csv -Path $Logfile -Append -NoTypeInformation
+        }
+    }
 }
 
 #Function to check if credentials are valid
@@ -326,7 +402,7 @@ function ADS-getDomainInfo
     Write-Host
     Write-Host "---Users in the Admin Groups (recursive search)---"
     Write-Host
-    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | get-adgroupmember -Recursive -Server $ADScout.dcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADScout.dcipp | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
+    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | get-adgroupmember -Recursive -Server $ADScout.dcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADScout.dcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
     Write-Host
     Write-Host "---Misc---"
     Get-ADObject -Identity ((Get-ADDomain -Server $ADScout.dcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADScout.dcip| select-object ms-DS-MachineAccountQuota
@@ -667,7 +743,15 @@ function ADS-portcheck {
         .Example
         ADS-portcheck 10.10.10.10 389 4000
     #>
-    Param($address, $port, $timeout=1000)
+    Param (
+        $address,
+        [ValidateRange(1,65535)]
+        [int] 
+        $port,
+        [ValidateRange(0,999999)]
+        [int] 
+        $timeout=1000
+    )
 
     $socket=New-Object System.Net.Sockets.TcpClient
     try {
@@ -689,7 +773,7 @@ function ADS-checkpreconditions {
         .Synopsis
         Checking if preconditions are met (internal only)
     #>
-    if (!$ADSconnectioncheck) {
+    if (!$ADScout.Connectioncheck) {
         ADS-connectionchecks
     }
 }
@@ -837,7 +921,7 @@ function ADS-connectionchecks
 }
 
 ## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
-Export-ModuleMember -Function ADS-commands,ADS-getDomainInfo,ADS-connectionchecks,ADS-cpshell,ADS-testcred,ADS-title,ADS-expwspraying
+Export-ModuleMember -Function ADS-commands,ADS-getDomainInfo,ADS-connectionchecks,ADS-cpshell,ADS-testcred,ADS-title,ADS-expwspraying,ADS-portcheck, ADS-out
 #Export-ModuleMember -function *
 
 
