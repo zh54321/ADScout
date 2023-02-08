@@ -11,9 +11,12 @@ Main functions:
 - Easy credential testing
 - Quick single port check (much faster than test-netconnection)
 - Can run as an in-memory function (New-Module -Name ADScout -ScriptBlock {Paste here} )
+- The whole module content can be runned as an fileless in-mmory module
+- Logging function which log the results of the different functions
+- Export users for password spraying (Interactive mode, normale mode, groubed by last pw changedate)
 
 Planned:
 - Auth test on users which are allowed to have an empty password
 - Quick basic but useful info about the domain
-- Various export functionalities (user export for pw spraying, user, computers, admins etc.)
+- Various export functionalities (user, computers, admins etc.)
 - User lockout / bad pw monitor (useful during pw spraying)
