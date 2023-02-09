@@ -35,15 +35,10 @@ There are 3 different modes available (all only select users which are: enabled,
 - ByYear: A user which set his password in 2021 will mostlikly not have the password Summer2023!. Therefore the script export the users according the year when the pw has been set the last time. If it never has been set the account creation date is taken instead.
 
 
-Examples:
-```powershell
-Normal:
+Example:
+```
 ADS-expwspraying
 ADS-expwspraying -mode normal
-
-Interactive:
-ADS-expwspraying -mode interactive
-
-ByYear:
+ADS-expwspraying -interactive
 ADS-expwspraying -mode byyear
 ```
