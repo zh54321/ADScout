@@ -29,23 +29,21 @@ Planned:
 
 Used to export usernames (samaccountname) for password spraying.
 
-There are 3 different modes available.
-- Default: Export all users for password spraying*
-- Interactive: Open a outgridview to interactivly search/filter the user which should be exported*
+There are 3 different modes available (all only select users which are: enabled, not locked and badpwcount is 0.).
+- Default: Export all users for password spraying
+- Interactive: Open a outgridview to interactivly search/filter the user which should be exported
 - ByYear: A user which set his password in 2021 will mostlikly not have the password Summer2023!. Therefore the script export the users according the year when the pw has been set the last time. If it never has been set the account creation date is taken instead.
-*All modes only select users which are: enabled, not locked and badpwcount is 0.
 
-Example:
-```
+
+Examples:
+```powershell
 Normal:
 ADS-expwspraying
 ADS-expwspraying -mode normal
 
 Interactive:
-ADS-expwspraying -interactive
+ADS-expwspraying -mode interactive
 
 ByYear:
 ADS-expwspraying -mode byyear
-
-
 ```

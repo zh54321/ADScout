@@ -233,6 +233,8 @@ function ADS-out {
         Get-process | ADS-writelogandoutput
         .Example
         ADS-writelogandoutput "logandprint" "CustomFunction" $Result
+        .LINK
+        https://github.com/zh54321/ADScout
     #>
     param
     (
@@ -250,7 +252,7 @@ function ADS-out {
     $all = @($input)
     $date = Get-Date -Format "yyyyMMdd"
     $date_ext = Get-Date -Format "yyyyMMdd_hhmmss"
-
+  
     #If custom is defined add proper seperator
     if ($custom) {
         $customstring= $custom + "_"
@@ -393,23 +395,25 @@ function ADS-expwspraying
         Export a lsit of users (samAccountname) for PW spraying.
         Only select accounts which are: enabled, not locked, badpwcount=0.
         Supports an interactivemode to select the desired user in a gridview and an export by last pw changedate.
-        .Parameter byyear
-        Export users by year they changed the password.
+        .Parameter mode
+        Supporting 3 different modes:
+        - normal: (Default) export all
+        - interactive: Start a GridView to select the users interactively
+        - byyear: Export the users in seperate lists by year of last pw changes
         .Parameter interactive
         Starts an interactive gridview to select the users to export.
         .Example
         ADS-expwspraying
         .Example
-        ADS-expwspraying -interactive
+        ADS-expwspraying -mode interactive
+        .Example
+        ADS-expwspraying -mode byyear
     #>
     Param (
 
-        [ValidateSet("normal", "byyear")]    
+        [ValidateSet("normal", "byyear", "interactive")]    
         [String[]]
-        $mode = "normal",
-        [Parameter(HelpMessage='Will start an interactive Gridview to choose the users')]
-        [switch]
-        $interactive
+        $mode = "normal"
     )
 
     ADS-checkpreconditions
@@ -418,7 +422,7 @@ function ADS-expwspraying
 
     "[*] Start -------Export Users for PW Spray-------" | ads-out -function $functionname
 
-    if ($interactive){    
+    if ($mode -eq "interactive"){    
         Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired,LastLogonDate,logonCount,whenCreated,whenChanged,ServicePrincipalNames, CanonicalName, Department, Description, Memberof, PasswordLastSet -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | select-object SamAccountName, logonCount,LastLogonDate, PasswordLastSet, whenChanged, whenCreated,ServicePrincipalNames, CanonicalName, Department, Description, Memberof | Out-GridView -Title "ADScout: Choose users for Export" -PassThru | Select-Object SamAccountName -ExpandProperty SamAccountName | ads-out -function $functionname -action export
         "[+] Exporting the accounts to $($ADScout.OutFolder)" | ads-out -function $functionname
     } elseif ($mode -eq "byyear") {
@@ -432,7 +436,7 @@ function ADS-expwspraying
         foreach ($year in $uniqueyears) {
             $table | Where-Object PasswordLastset -EQ $year | Select-Object SamAccountName -ExpandProperty SamAccountName | ads-out -function $functionname -action export -custom users$year
         }
-        #badpwdcount is not replicated https://learn.microsoft.com/de-de/windows/win32/adschema/a-badpwdcount?redirectedfrom=M
+        #badpwdcount is not replicated https://learn.microsoft.com/de-de/windows/win32/adschema/a-badpwdcount?redirectedfrom=M query PDC!
     } else {
         "[*] Searching users which are: Enabled, not locked, no badpwdcount" | ads-out -function $functionname
         $table = Get-ADUser -Properties SamAccountName,LockedOut,badPwdCount,PasswordExpired,PasswordLastSet,whenCreated -Filter {Enabled -eq "true"} -Server $ADScout.Dcip | where-object {$_.LockedOut -eq 0 -and $_.badPwdCount -eq 0} | select-object samaccountname, @{n='PasswordLastset';e={if ($_.PasswordLastSet.year -gt 1970){$_.PasswordLastSet.year} else{ $_.whencreated.year} }}
@@ -445,7 +449,7 @@ function ADS-expwspraying
     }
 }
 
-function ADS-explorerUsers
+function ADS-exploreUsers
 {
     ADS-checkpreconditions
     $functionname = $MyInvocation.MyCommand
