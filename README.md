@@ -36,9 +36,14 @@ There are 3 different modes available (all only select users which are: enabled,
 
 
 Example:
-```
+```powershell
+Normal:
 ADS-expwspraying
 ADS-expwspraying -mode normal
+
+Interactive:
 ADS-expwspraying -interactive
+
+ByYear:
 ADS-expwspraying -mode byyear
 ```
