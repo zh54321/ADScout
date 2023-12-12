@@ -1,4 +1,4 @@
-# ADScout
+# ADScout (Work in progress)
 
 Yet another small Powershell AD Pentest helper.
 Main focuse are quality of life improvements.
