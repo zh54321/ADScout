@@ -23,6 +23,47 @@ Planned:
 - Various export functionalities (user, computers, admins etc.)
 - User lockout / bad pw monitor (useful during pw spraying)
 
+## Show available commands
+
+Show the available commands
+
+Example:
+```powershell
+ADS-commands
+```
+
+## Set a windows-Title
+
+Rename the window title to find in better in the taskbar.
+If the console runs in another user context (run as) this information will be preserved.
+
+Example:
+```powershell
+ADS-title Snaffler
+```
+
+## Open a new PS Window
+
+The function checks if the shell runs as another user (based on windows title) and starts a new shell.
+In the new shell the ADScout module is imported and the config is loaded (if present).
+No parameters...
+
+Example:
+```powershell
+ADS-cpshell
+```
+
+## Test credentials
+
+Foun credentials and want an easy way to test it?
+Test the credential of a user. The user will be defined interactivly.
+No parameters...
+
+Example:
+```powershell
+ADS-testcred
+```
+
 
 # Functions
 ## Export Users for Password spraying
@@ -47,3 +88,34 @@ ADS-expwspraying -interactive
 ByYear:
 ADS-expwspraying -mode byyear
 ```
+
+## Get basic domain information (needs to be improved)
+
+Get some domain information like:
+- Domain information
+- Domain Controllers
+- Count of USers / Groups / Computers
+- Some interesting groups
+
+Example:
+```powershell
+ADS-getDomainInfo
+```
+
+## Single port scan
+
+A simple and fast (compared to test-netconnection) port check (TCP Full connection).
+Give back true or false depending if the connection has been established.
+
+Takes 2 parameters:
+- Port: Port to check
+- Timeout: How long (ms) to wait for reply (default is set to 1000ms).
+
+Example:
+```powershell
+ADS-portcheck 10.10.10.10 389
+
+ADS-portcheck 10.10.10.10 389 4000
+```
+
+
