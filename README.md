@@ -94,7 +94,7 @@ ADS-expwspraying -mode byyear
 Get some domain information like:
 - Domain information
 - Domain Controllers
-- Count of USers / Groups / Computers
+- Count of Users / Groups / Computers
 - Some interesting groups
 
 Example:
